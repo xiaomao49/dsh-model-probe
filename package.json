@@ -40,7 +40,7 @@
     "@deepseek-ai/schemastery": "3.18.2"
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test test/*.test.mjs"
   },
   "keywords": [
     "deepseek-harness",
