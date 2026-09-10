@@ -15,9 +15,9 @@ jobs:
         # 插件声明 engines.node >=20；测两个 LTS 与开发版，覆盖运行时会遇到的区间。
         node-version: ['20', '22', '24']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -33,9 +33,9 @@ jobs:
     # 这样清单出问题时的失败信息是直指要害的，而不是淹没在测试输出里。
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
 
