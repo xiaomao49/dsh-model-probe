@@ -17,7 +17,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildProviderOps, applyFindings, auditModel, VERDICT } from '../lib/audit.js'
+import { buildProviderOps, applyFindings, auditModel, summarize, VERDICT } from '../lib/audit.js'
 import { Config } from '@deepseek-ai/dsh-llm-pi-ai'
 
 // ── 忠实复刻 dsh-settings 的路径操作语义 ─────────────────────────────────────
@@ -456,4 +456,48 @@ test('端到端：基于解析值写入会污染配置（记录这个陷阱本�
   assert.ok(polluted.compat, '解析值带 compat 默认字段 —— 这正是不能用它写回的原因')
   assert.deepEqual(polluted.compat.chatTemplateKwargs, {})
   assert.deepEqual(polluted.compat.chatTemplateArgs, {})
+})
+
+// ── 「全部失败却报成功」回归 ──────────────────────────────────────────────────
+//
+// 真实现场：端点不可达，每个字段都取证失败（全部 fetch failed），界面却显示
+// 绿色的「配置与实测一致，无需改动」。这是本插件最不该犯的错误 —— 它把一次
+// 彻底失败的扫描呈现为"配置正确"，比直接报错危险得多。
+
+test('回归：全部取证失败时 verified 为 0，绝不能算作"一致"', () => {
+  // 模拟端点整体不可达：所有字段都是 unknown。
+  const current = { id: 'm', maxTokens: 384000, contextWindow: 1000000 }
+  const findings = auditModel({ current, measured: {} })
+
+  assert.ok(
+    findings.every((f) => f.verdict === VERDICT.UNKNOWN),
+    '无测量值时应全部为 unknown',
+  )
+
+  const s = summarize(findings)
+  assert.equal(s.verified, 0, '没有任何字段被验证')
+  assert.equal(s.unknown, findings.length)
+  // 关键：unknown 不产生任何写入，这是对的；但调用方必须靠 verified 区分
+  // "测过且一致"与"根本没测成"。
+  assert.deepEqual(buildProviderOps({ provider: 'p', models: [current], perModel: [{ index: 0, findings }] }), [])
+})
+
+test('回归：确实测过且一致时 verified 大于 0', () => {
+  const current = { id: 'm', maxTokens: 384000 }
+  const findings = auditModel({
+    current,
+    measured: {
+      maxTokens: {
+        value: 393216,
+        confidence: 'high',
+        evidence: 'x',
+        constraintMin: 1,
+        constraintMax: 393216,
+      },
+    },
+  })
+  const s = summarize(findings)
+  assert.equal(s.verified, 1, '该字段拿到了确凿证据')
+  // 其余三个字段没有测量值，计为 unknown —— 这正是要与"已验证"区分开的部分。
+  assert.equal(s.unknown, 3)
 })

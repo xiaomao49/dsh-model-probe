@@ -366,10 +366,12 @@ test('无待修正项时显示"无需改动"而不是空白的计划区', async 
     },
     plan: [],
     opCount: 0,
+    verification: { verifiedFields: 4, unknownFields: 0, anyRequestSucceeded: true },
+    verifiedNothing: false,
   }
   const tree = render(Component, [STATUS_FIXTURE, '', null, { 'cc-goat': clean }])
   const text = collectText(tree).join(' ')
-  assert.match(text, /配置与实测一致/)
+  assert.match(text, /已取证 4 个字段，配置与实测一致/)
 })
 
 test('提示文案如实反映探测开关状态，不说"默认关闭"当已经开着', async () => {
@@ -395,4 +397,71 @@ test('提示文案区分策略能否持久化', async () => {
   const volatile = { ...STATUS_FIXTURE, policyPersisted: false }
   const volatileText = collectText(render(Component, [volatile, '', null, {}])).join(' ')
   assert.match(volatileText, /重启后会重置为关闭/)
+})
+
+test('回归：全部取证失败时显示错误，绝不显示绿色"一致"', async () => {
+  // 真实现场：端点不可达，所有字段 fetch failed，界面却报"配置与实测一致，
+  // 无需改动"。这是本插件最不该犯的错误，必须被锁死。
+  const Component = await loadComponent()
+  const allFailed = {
+    ok: true,
+    scan: {
+      provider: 'cc-goat',
+      budget: { requests: 7, outputTokens: 0 },
+      listingOk: false,
+      listingReason: 'fetch failed: ENOTFOUND（域名解析失败）',
+      models: [
+        {
+          model: 'deepseek/deepseek-v4.1-flash',
+          index: 0,
+          summary: { counts: { unknown: 4 }, verified: 0, unknown: 4 },
+          notes: ['输出上限未知：fetch failed', '推理档位未知：fetch failed'],
+          findings: [],
+        },
+      ],
+      verification: { verifiedFields: 0, unknownFields: 4, anyRequestSucceeded: false, transportFailure: true },
+    },
+    plan: [],
+    opCount: 0,
+    verification: { verifiedFields: 0, unknownFields: 4, anyRequestSucceeded: false, transportFailure: true },
+    verifiedNothing: true,
+  }
+  const tree = render(Component, [STATUS_FIXTURE, '', null, { 'cc-goat': allFailed }])
+  const text = collectText(tree).join(' ')
+
+  assert.match(text, /本次未能取证/, '必须明确报告失败')
+  assert.doesNotMatch(text, /配置与实测一致/, '绝不能显示成一致')
+  // 逐模型的"未取证"计数也要显示，而不是含糊的"0 项正常"。
+  assert.match(text, /4 项未取证/)
+})
+
+test('回归：部分取证成功时，绿色提示里说明还有多少未取证', async () => {
+  const Component = await loadComponent()
+  const partial = {
+    ok: true,
+    scan: {
+      provider: 'cc-goat',
+      budget: { requests: 5, outputTokens: 10 },
+      listingOk: true,
+      models: [
+        {
+          model: 'm',
+          index: 0,
+          summary: { counts: { ok: 1, unknown: 3 }, verified: 1, unknown: 3 },
+          notes: [],
+          findings: [],
+        },
+      ],
+      verification: { verifiedFields: 1, unknownFields: 3, anyRequestSucceeded: true, transportFailure: false },
+    },
+    plan: [],
+    opCount: 0,
+    verification: { verifiedFields: 1, unknownFields: 3, anyRequestSucceeded: true, transportFailure: false },
+    verifiedNothing: false,
+  }
+  const tree = render(Component, [STATUS_FIXTURE, '', null, { 'cc-goat': partial }])
+  const text = collectText(tree).join(' ')
+
+  assert.match(text, /已取证 1 个字段/)
+  assert.match(text, /另有 3 个字段未能取证/, '部分失败必须如实说明')
 })
