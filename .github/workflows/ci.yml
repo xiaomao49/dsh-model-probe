@@ -23,7 +23,7 @@ jobs:
           cache: npm
 
       - name: 安装依赖
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: 运行测试
         run: npm test
@@ -71,7 +71,7 @@ jobs:
 
       - name: 校验主入口可加载
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           node -e '
             import("dsh-model-probe").then((m) => {
               if (typeof m.apply !== "function") throw new Error("未导出 apply")
