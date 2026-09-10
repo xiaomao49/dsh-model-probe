@@ -7,7 +7,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseNumericRange, parseEnumOptions, classifyProbe } from '../lib/elicit.js'
+import { parseNumericRange, parseEnumOptions, classifyProbe, looksModelUnavailable } from '../lib/elicit.js'
 
 test('解析 max_tokens 上界：deepseek 的英文区间文案', () => {
   // real: 对 cc-goat 发 max_tokens=1000000 时的响应体（JSON 包装内层 message）
@@ -78,4 +78,40 @@ test('探测结论分类：三种语义必须区分开', () => {
   assert.equal(classifyProbe({ ok: true, status: 200, text: '{"choices":[]}' }), 'accepted')
   // 网络层失败 —— 什么都没证明
   assert.equal(classifyProbe({ ok: false, status: 0, text: '', error: 'timeout' }), 'inconclusive')
+})
+
+// ── 以下三条夹具来自对同一网关其它模型的真实探测 ──────────────────────────────
+
+test('解析 max_tokens 上界：Moonshot 的 between 文案（无方括号）', () => {
+  // real: 对 moonshotai/Kimi-K3 发 max_tokens=100000000 时的响应体
+  const real =
+    '{"error":{"message":"{\\"code\\":400,\\"reason\\":\\"INVALID_REQUEST_BODY\\",\\"message\\":\\"max_tokens (current value: 100000000) must be between 0 and 1048576 \\",\\"metadata\\":{}}","type":"invalid_request_error"}}'
+  assert.deepEqual(parseNumericRange(real), { min: 0, max: 1048576 })
+})
+
+test('解析 max_tokens 上界：MiniMax 的 "does not support >" 文案（只有上界）', () => {
+  // real: 对 MiniMaxAI/MiniMax-M3 发 max_tokens=100000000 时的响应体
+  const real =
+    '{"error":{"message":"{\\"error\\":{\\"message\\":\\"invalid params, model[MiniMax-M3] does not support max tokens > 524288 (2013)\\",\\"type\\":\\"AI_APICallError\\"}}","type":"invalid_request_error"}}'
+  const range = parseNumericRange(real)
+  assert.equal(range.max, 524288)
+  // 该文案不含下界，因此 min 必须是 undefined 而不是 0 —— 否则审计会把
+  // 一个合法的小值误判成"低于下界"。
+  assert.equal(range.min, undefined)
+})
+
+test('解析 max_tokens 上界：中文"超过"文案同样只给上界', () => {
+  const range = parseNumericRange('max_tokens 超过 65536 会被拒绝')
+  assert.equal(range.max, 65536)
+  assert.equal(range.min, undefined)
+})
+
+test('不可用模型识别：No available providers', () => {
+  // real: 某网关对 deepseek-v4-flash-vision-exp 的响应
+  const real =
+    '{"error":{"message":"No available providers match the \'only\' filter: deepseek. Available providers are: deepinfra, fireworks"}}'
+  assert.equal(looksModelUnavailable(real), true)
+  // 参数越界不应被误判成不可用
+  assert.equal(looksModelUnavailable('max_tokens must be between 0 and 1048576'), false)
+  assert.equal(looksModelUnavailable(''), false)
 })

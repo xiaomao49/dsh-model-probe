@@ -88,3 +88,238 @@ test('探针图的图形数量必须等于 ground truth（连通域计数）', (
     assert.equal(matching.length, 1, `第 ${i} 轮：应恰好有一种干扰色，实际 ${matching.join(',')}`)
   }
 })
+
+// ── "看不到图"识别：这是过度声明能力最危险的形态 ─────────────────────────────
+//
+// 实测 deepseek-v4-pro 收到图片后回答 "I can't see the image, so I can't count
+// the yellow circles." —— HTTP 200、finish=stop、无任何报错。若把这种回答当成
+// "读不出数字"的无结论，就漏掉了真实问题：声明了图像能力，图片却被静默忽略。
+
+import { probeVision } from '../lib/probe.js'
+
+/** 构造一个只返回指定文本的假端点。 */
+function stubEndpoint(text, { finish = 'stop' } = {}) {
+  const calls = []
+  const original = globalThis.fetch
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) })
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { role: 'assistant', content: text }, finish_reason: finish }],
+        usage: { completion_tokens: 10, completion_tokens_details: { reasoning_tokens: 5 } },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  }
+  return { calls, restore: () => { globalThis.fetch = original } }
+}
+
+test('模型回答"看不到图片"→ 判定为不支持图像，而不是无结论', async () => {
+  const stub = stubEndpoint("I can't see the image, so I can't count the yellow circles.")
+  try {
+    const r = await probeVision({
+      baseURL: 'https://x.invalid/v1',
+      api: 'openai-completions',
+      apiKey: 'k',
+      model: 'm',
+      budget: { spend() {}, addTokens() {} },
+    })
+    assert.equal(r.ok, true, `应给出结论，实际：${JSON.stringify(r)}`)
+    assert.equal(r.supportsImage, false)
+  } finally {
+    stub.restore()
+  }
+})
+
+test('中文"看不到图片"同样识别', async () => {
+  const stub = stubEndpoint('抱歉，我无法查看图片，因此无法数出黄色圆形的数量。')
+  try {
+    const r = await probeVision({
+      baseURL: 'https://x.invalid/v1',
+      api: 'openai-completions',
+      apiKey: 'k',
+      model: 'm',
+      budget: { spend() {}, addTokens() {} },
+    })
+    assert.equal(r.ok, true)
+    assert.equal(r.supportsImage, false)
+  } finally {
+    stub.restore()
+  }
+})
+
+test('正文被推理占满时自动加大额度重试一次', async () => {
+  // 每次尝试都会生成一张**新图**，所以第二张图的正确答案与第一张不同。
+  // 用两个相同种子的 rng：一个预先推算答案，一个交给被测代码使用。
+  const rngFor = (seed0) => {
+    let s = seed0
+    return () => {
+      s = (s * 1103515245 + 12345) & 0x7fffffff
+      return s / 0x7fffffff
+    }
+  }
+  const predict = rngFor(7)
+  makeVisionProbe(predict) // 第一次尝试的图（其回答是空的，答案用不到）
+  const secondExpected = makeVisionProbe(predict).answer.count
+
+  let attempt = 0
+  const original = globalThis.fetch
+  const seen = []
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body)
+    seen.push(body.max_tokens)
+    attempt += 1
+    // 第一次：额度被思考吃光，正文为空且被截断；之后：正常答对。
+    if (attempt === 1) {
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '' }, finish_reason: 'length' }], usage: {} }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    }
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: String(secondExpected) }, finish_reason: 'stop' }],
+        usage: { completion_tokens: 20 },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  }
+  try {
+    const r = await probeVision({
+      baseURL: 'https://x.invalid/v1',
+      api: 'openai-completions',
+      apiKey: 'k',
+      model: 'm',
+      budget: { spend() {}, addTokens() {} },
+      rng: rngFor(7),
+    })
+    assert.equal(seen.length, 2, `应当恰好重试一次，实际 ${seen.length} 次`)
+    assert.ok(seen[1] > seen[0], `重试的额度应更大：${seen.join(' → ')}`)
+    assert.equal(r.ok, true, `应给出结论：${JSON.stringify(r)}`)
+    assert.equal(r.supportsImage, true)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('非额度原因的失败不重试（避免无谓请求）', async () => {
+  const stub = stubEndpoint('这是一段没有数字的回答')
+  try {
+    const r = await probeVision({
+      baseURL: 'https://x.invalid/v1',
+      api: 'openai-completions',
+      apiKey: 'k',
+      model: 'm',
+      budget: { spend() {}, addTokens() {} },
+    })
+    assert.equal(r.ok, false)
+    assert.match(r.reason, /无法从回答中读出数字/)
+    assert.equal(stub.calls.length, 1, '不应重试')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('答 0 是结构性强证据：直接判不支持，不重试', async () => {
+  // 探针图的目标图形数恒为 2..5，答 0 在结构上不可能 —— 这是"看不到"的证据，
+  // 不是数错。因此不应浪费一次重试。
+  const stub = stubEndpoint('0')
+  try {
+    const r = await probeVision({
+      baseURL: 'https://x.invalid/v1',
+      api: 'openai-completions',
+      apiKey: 'k',
+      model: 'm',
+      budget: { spend() {}, addTokens() {} },
+    })
+    assert.equal(r.ok, true)
+    assert.equal(r.supportsImage, false)
+    assert.match(r.raw, /答 0/)
+    assert.equal(stub.calls.length, 1, '答 0 无需重试')
+  } finally {
+    stub.restore()
+  }
+})
+
+test('答对一个非零错数：换图复核，第二次答对则判支持', async () => {
+  // 这是关键的不对称保护：有视觉但偶尔数错的模型不应被判成"不支持"，
+  // 否则 DSH 会在该模型上永久拒收图片。
+  //
+  // 每次尝试用的是新图，因此必须分别推算两次的正确数 —— 用两个相同种子的 rng。
+  const rngFor = (seed0) => {
+    let s = seed0
+    return () => {
+      s = (s * 1103515245 + 12345) & 0x7fffffff
+      return s / 0x7fffffff
+    }
+  }
+  const predict = rngFor(99)
+  const firstExpected = makeVisionProbe(predict).answer.count
+  const secondExpected = makeVisionProbe(predict).answer.count
+
+  // 第一次故意给一个非零错数（数量恒为 2..5，所以挑一个不等于正确答案且非 0 的值）
+  const wrong = [1, 2, 3, 4, 5, 6].find((n) => n !== firstExpected && n !== 0) ?? 6
+  assert.notEqual(wrong, 0)
+  assert.notEqual(wrong, firstExpected)
+
+  let n = 0
+  const original = globalThis.fetch
+  globalThis.fetch = async () => {
+    n += 1
+    const text = n === 1 ? String(wrong) : String(secondExpected)
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: text }, finish_reason: 'stop' }],
+        usage: { completion_tokens: 5 },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  }
+  try {
+    const r = await probeVision({
+      baseURL: 'https://x.invalid/v1',
+      api: 'openai-completions',
+      apiKey: 'k',
+      model: 'm',
+      budget: { spend() {}, addTokens() {} },
+      rng: rngFor(99),
+    })
+    assert.equal(n, 2, '应换图复核一次')
+    assert.equal(r.ok, true, `应给出结论：${JSON.stringify(r)}`)
+    assert.equal(r.supportsImage, true, '第二次答对应判为支持')
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('两次都答错非零值：判不支持', async () => {
+  // 确保"保护真有视觉的模型"不会滑向"永远不下结论"。
+  const original = globalThis.fetch
+  let n = 0
+  globalThis.fetch = async () => {
+    n += 1
+    // 恒定给一个非零错数（1 永远不可能是正确答案，因为数量是 2..5）
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: '1' }, finish_reason: 'stop' }],
+        usage: { completion_tokens: 5 },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  }
+  try {
+    const r = await probeVision({
+      baseURL: 'https://x.invalid/v1',
+      api: 'openai-completions',
+      apiKey: 'k',
+      model: 'm',
+      budget: { spend() {}, addTokens() {} },
+    })
+    assert.equal(n, 2, '应复核两次')
+    assert.equal(r.ok, true)
+    assert.equal(r.supportsImage, false)
+    assert.match(r.raw, /两次换图复核均数错/)
+  } finally {
+    globalThis.fetch = original
+  }
+})
