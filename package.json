@@ -1,6 +1,6 @@
 {
   "name": "dsh-model-probe",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "description": "Audit and correct llm-pi-ai model capability declarations by probing the endpoint itself: out-of-range maxTokens, contextWindow, reasoning levels, image input.",
   "main": "lib/index.js",
