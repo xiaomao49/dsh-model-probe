@@ -1,0 +1,22 @@
+# 提交给 awesome-dsh-plugin 的条目文件。
+#
+# 用法：把本文件复制到 awesome-dsh-plugin 仓库的
+#   data/plugins/xiaomao49__dsh-model-probe.yml
+# 然后提一个 PR。README 由脚本从 data/plugins/*.yml 生成，不要手工改 README。
+#
+# 提交前请确认（contributing.md 的要求）：
+#   1. package.json 声明了 dsh.bundle —— 已声明，见 "dsh": { "bundle": {...} }
+#   2. 仓库根有 cordis.patch.yml —— 已有
+#   3. 仓库创建满 1 天（CI 自动检查）
+#   4. 仓库添加了 dsh-plugin topic：
+#        gh repo edit xiaomao49/dsh-model-probe --add-topic dsh-plugin
+#   5. 描述属实、不含营销词
+#
+# 注意：描述里若出现「冒号+空格」必须给整行加引号，否则 YAML 会当作嵌套键。
+
+url: https://github.com/xiaomao49/dsh-model-probe
+name: xiaomao49/dsh-model-probe
+category: model
+description:
+  en: 'Audit and correct llm-pi-ai model capability declarations by probing the endpoint itself: out-of-range maxTokens, contextWindow, reasoning levels, image input.'
+  zh: '向端点取证，审计并修正 llm-pi-ai 的模型能力声明：发现越界的输出上限，补全上下文窗口、推理档位与图像输入支持。'

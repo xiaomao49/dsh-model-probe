@@ -1,0 +1,20 @@
+# dsh-model-probe bundle patch：把插件行挂进 Web profile 的组合。
+#
+# 这个文件由 profile 层在加载时应用。insert 列表里的每一项都会成为
+# 组合中的一个插件条目；id 是组合内的唯一标识，name 是 npm 包名
+# （本地目录安装时即包名本身）。
+- insert:
+    - id: model-probe
+      name: 'dsh-model-probe'
+      config:
+        # 探测默认关闭：扫描会向端点发真实请求，必须逐 provider 显式开启。
+        # 可在设置页「模型配置实测」里开关，无需改这里。
+        enabledProviders: []
+        # 每次扫描的请求数上限，防止误开导致大量请求。
+        maxRequestsPerScan: 60
+        # 图像能力实证是唯一产生输出 token 的环节，可关。
+        visionProbe: true
+        # 数值比较容差：当前值已有值、且与实测差距在此比例以内时不改动配置，
+        # 超过才覆盖。避免为 1M/1MiB 这类单位差异或无意义的微小偏差制造改动。
+        # 它只影响"要不要改"，不影响越界判定：越过端点硬约束的值照修不误。
+        toleranceRatio: 0.05

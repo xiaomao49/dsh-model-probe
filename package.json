@@ -1,0 +1,70 @@
+{
+  "name": "dsh-model-probe",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Audit and correct llm-pi-ai model capability declarations by probing the endpoint itself: out-of-range maxTokens, contextWindow, reasoning levels, image input.",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.1 <0.1.1-0 || >=0.1.1-rc.1 <0.1.2-0 || >=0.1.2-alpha.1 <0.1.3-0 || >=0.1.3-0 <0.1.4-0 || >=0.1.4-0 <0.1.5-0 || >=0.1.5-alpha.1 <0.2.0-0",
+    "@deepseek-ai/schemastery": "^3.18.0",
+    "react": "^18.2.0 || ^19.0.0"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "devDependencies": {
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@deepseek-ai/schemastery": "3.18.2"
+  },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "llm-pi-ai",
+    "model-metadata",
+    "context-window",
+    "max-tokens",
+    "reasoning-effort",
+    "provider-config"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xiaomao49/dsh-model-probe.git"
+  },
+  "homepage": "https://github.com/xiaomao49/dsh-model-probe#readme",
+  "bugs": {
+    "url": "https://github.com/xiaomao49/dsh-model-probe/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
