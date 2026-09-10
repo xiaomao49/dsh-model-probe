@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 插件声明 engines.node >=20；测两个 LTS 与开发版，覆盖运行时会遇到的区间。
+        node-version: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: 安装依赖
+        run: npm install --no-audit --no-fund
+
+      - name: 运行测试
+        run: npm test
+
+  manifest:
+    # 单独校验"能否被 dsh plugin add 安装"所需的声明，与测试分开，
+    # 这样清单出问题时的失败信息是直指要害的，而不是淹没在测试输出里。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 校验 dsh 清单声明
+        run: |
+          node -e '
+            const fs = require("fs")
+            const p = JSON.parse(fs.readFileSync("package.json", "utf8"))
+            const fail = (m) => { console.error("✘ " + m); process.exitCode = 1 }
+            const ok = (m) => console.log("✔ " + m)
+
+            // dsh.bundle 是 dsh plugin add 能安装的前提；只有 dsh.client 不够。
+            if (!p.dsh || !p.dsh.bundle || !p.dsh.bundle.patch) fail("package.json 缺少 dsh.bundle.patch")
+            else ok("声明了 dsh.bundle.patch")
+
+            const patch = p.dsh && p.dsh.bundle && p.dsh.bundle.patch
+            if (patch && !fs.existsSync(patch)) fail("dsh.bundle.patch 指向的文件不存在：" + patch)
+            else if (patch) ok("补丁文件存在：" + patch)
+
+            for (const field of ["name", "version", "license", "description"]) {
+              if (!p[field]) fail("package.json 缺少 " + field)
+            }
+
+            // 官方包必须走 peerDependencies：打进 dependencies 会在用户环境里
+            // 装出第二份 harness 运行时。
+            const official = Object.keys(p.dependencies || {}).filter((d) => d.startsWith("@deepseek-ai/"))
+            if (official.length) fail("官方包出现在 dependencies 中：" + official.join(", "))
+            else ok("官方包未混入 dependencies")
+
+            if (p.private === true) fail("package.json 标记了 private，无法发布")
+            else ok("可发布（未标记 private）")
+          '
+
+      - name: 校验主入口可加载
+        run: |
+          npm install --no-audit --no-fund
+          node -e '
+            import("dsh-model-probe").then((m) => {
+              if (typeof m.apply !== "function") throw new Error("未导出 apply")
+              if (!Array.isArray(m.inject)) throw new Error("未导出 inject")
+              console.log("✔ 主入口可加载：name=" + m.name + " inject=" + JSON.stringify(m.inject))
+            }).catch((e) => { console.error("✘ 加载失败：" + e.message); process.exit(1) })
+          '

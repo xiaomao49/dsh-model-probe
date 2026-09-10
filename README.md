@@ -2,6 +2,11 @@
 
 **English** | [中文](#中文说明)
 
+[![CI](https://github.com/xiaomao49/dsh-model-probe/actions/workflows/ci.yml/badge.svg)](https://github.com/xiaomao49/dsh-model-probe/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe)
+[![dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-4d6bfe)](https://github.com/topics/dsh-plugin)
+
 Audit and correct model capability declarations for `llm-pi-ai` providers in
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — by asking the
 endpoint itself instead of trusting a knowledge base.
