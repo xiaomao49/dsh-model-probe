@@ -3,6 +3,7 @@
 **English** | [中文](#中文说明)
 
 [![CI](https://github.com/xiaomao49/dsh-model-probe/actions/workflows/ci.yml/badge.svg)](https://github.com/xiaomao49/dsh-model-probe/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/dsh-model-probe.svg)](https://www.npmjs.com/package/dsh-model-probe)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 ![DeepSeek Harness](https://img.shields.io/badge/DeepSeek%20Harness-plugin-4d6bfe)
 [![dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-4d6bfe)](https://github.com/topics/dsh-plugin)
@@ -53,12 +54,20 @@ image" without any real vision; counting coloured shapes cannot be faked that wa
 
 ## Install
 
+From npm — prebuilt, so the install skips the `allowBuilds` build-approval step:
+
+```sh
+dsh plugin --profile web add dsh-model-probe
+```
+
+From GitHub:
+
 ```sh
 dsh plugin --profile web add github:xiaomao49/dsh-model-probe
 ```
 
-Then restart DSH. The repository is plain JavaScript with no build step, so no
-`allowBuilds` approval is needed.
+Then restart DSH. The package is plain JavaScript with no build step, so either
+route installs without a build approval.
 
 ## Use
 
@@ -164,11 +173,19 @@ OCR 型网关能答对「图里是什么字」却没有真正的视觉能力，�
 
 ### 安装
 
+从 npm 安装——预构建，免去 `allowBuilds` 构建授权：
+
+```sh
+dsh plugin --profile web add dsh-model-probe
+```
+
+从 GitHub 安装：
+
 ```sh
 dsh plugin --profile web add github:xiaomao49/dsh-model-probe
 ```
 
-然后重启 DSH。仓库是纯 JavaScript、无构建步骤，不需要 `allowBuilds` 授权。
+然后重启 DSH。包是纯 JavaScript、无构建步骤，两种方式都不需要构建授权。
 
 ### 使用
 
