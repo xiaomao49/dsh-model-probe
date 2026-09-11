@@ -12,6 +12,23 @@ Audit and correct model capability declarations for `llm-pi-ai` providers in
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — by asking the
 endpoint itself instead of trusting a knowledge base.
 
+## What it is
+
+A DeepSeek Harness plugin that measures what an `llm-pi-ai` endpoint actually accepts,
+compares that measurement against your declared model configuration, and rewrites only
+what the evidence proves wrong.
+
+- **Audits, then fills.** A field that already has a value is checked against evidence
+  rather than skipped — the one failure mode a config filler cannot see.
+- **Four fields** — `contextWindow`, `maxTokens`, `reasoningEfforts`, `input` (image
+  support).
+- **Two surfaces** — the settings page **模型配置实测** with a per-provider switch, a
+  read-only scan and an explicit confirm before writing; and the agent tools
+  `model_probe_status`, `model_probe_scan`, `model_probe_apply`.
+- **Two protocols** — `openai-completions` and `anthropic-messages`.
+- **A self-contained package** — plain JavaScript, no build step, no runtime
+  dependencies; even the probe image is synthesized in-process.
+
 ## Why
 
 A mis-declared model costs you silently. Two real cases this plugin was built from:
@@ -208,18 +225,6 @@ fields were actually measured. The fixtures include verbatim error bodies captur
 a real gateway, and a byte-level reimplementation of the settings path-op semantics, so
 writes are validated against the real schema before they are considered correct.
 
-## Changelog
-
-Full history in [CHANGELOG.md](./CHANGELOG.md). Recent releases:
-
-- **0.1.4** — documentation audit. The evidence table listed a bisection layer that never
-  existed in the code, and the English section quoted bilingual UI labels the interface
-  does not have. Adds the changelog and documents the configuration keys.
-- **0.1.3** — a run in which every request failed no longer reports "configuration matches
-  measurement" (the worst bug this plugin could have); host-supplied peers marked
-  optional, so a fresh install no longer ends on `pnpm peers check` exiting 1.
-- **0.1.2** — reads more endpoint error shapes; stops guessing at vision.
-
 ## License
 
 MIT
@@ -229,6 +234,19 @@ MIT
 ## 中文说明
 
 向端点本身取证，审计并修正 `llm-pi-ai` 供应商的模型能力声明。
+
+### 这是什么
+
+一个 DeepSeek Harness 插件：实测 `llm-pi-ai` 端点真正接受什么，把实测结果与你声明的模型
+配置逐字段比对，只改有证据证明是错的那部分。
+
+- **先审计，再补全。** 已经有值的字段会被拿去和证据核对，而不是被跳过——这正是配置填充器
+  看不见的那类问题。
+- **四个字段** —— `contextWindow`、`maxTokens`、`reasoningEfforts`、`input`（图像支持）。
+- **两个入口** —— 设置页「模型配置实测」：逐 provider 开关、只读扫描、写入前显式确认；以及
+  Agent 工具 `model_probe_status`、`model_probe_scan`、`model_probe_apply`。
+- **两种协议** —— `openai-completions` 与 `anthropic-messages`。
+- **自包含的包** —— 纯 JavaScript，无构建步骤、无运行时依赖；连探针图片都在进程内合成。
 
 ### 为什么需要它
 
@@ -401,16 +419,6 @@ npm test
 106 项。其中含专门钉住「报告口径」的回归：全部取证失败时绝不能渲染成「无需改动」；部分
 取证成功时必须说明究竟量到了几个字段。测试夹具里有从真实网关逐字抓下来的错误体，还有一份
 对设置路径操作语义的逐字节复刻，因此写入在通过之前就已经过真实 schema 校验。
-
-### 更新日志
-
-完整历史见 [CHANGELOG.md](./CHANGELOG.md)。近期版本：
-
-- **0.1.4** —— 文档审计。取证表里列了一层代码中从不存在的「二分/枚举」，英文段引用了界面
-  上并不存在的中英双语标签。补上更新日志并文档化配置项。
-- **0.1.3** —— 所有请求都失败时不再报「配置与实测一致」（这是本插件最不该犯的错）；宿主
-  peer 标为 optional，全新安装不再以 `pnpm peers check` 退出码 1 收尾。
-- **0.1.2** —— 能解析更多端点报错形态；不再猜测图像能力。
 
 ### 许可
 

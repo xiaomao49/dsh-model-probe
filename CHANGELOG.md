@@ -9,6 +9,15 @@ never got one and links to npm instead. GitHub Releases were first published wit
 so the entries below are reconstructed from those tags, the npm publish times and the
 commit history.
 
+## [0.1.5] — 2026-09-11
+
+### Changed
+
+- The README is an introduction to the plugin again: it opens with a **What it is**
+  section (audits before it fills, the four fields, both surfaces, both protocols, no
+  runtime dependencies) instead of carrying version history. Release notes live here in
+  `CHANGELOG.md`, in the git tags and in the GitHub Releases.
+
 ## [0.1.4] — 2026-09-11
 
 ### Added
@@ -97,6 +106,7 @@ commit history.
 - The settings page 模型配置实测, and the agent tools `model_probe_status`,
   `model_probe_scan` and `model_probe_apply`.
 
+[0.1.5]: https://github.com/xiaomao49/dsh-model-probe/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/xiaomao49/dsh-model-probe/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/xiaomao49/dsh-model-probe/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/xiaomao49/dsh-model-probe/compare/v0.1.1...v0.1.2
