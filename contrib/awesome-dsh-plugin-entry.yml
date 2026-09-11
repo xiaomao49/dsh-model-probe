@@ -18,5 +18,5 @@ url: https://github.com/xiaomao49/dsh-model-probe
 name: xiaomao49/dsh-model-probe
 category: model
 description:
-  en: 'Audit and correct llm-pi-ai model capability declarations by probing the endpoint itself: out-of-range maxTokens, contextWindow, reasoning levels, image input.'
+  en: 'DeepSeek Harness plugin to audit and correct llm-pi-ai model capability declarations by probing the endpoint itself: out-of-range maxTokens, contextWindow, reasoning levels, image input.'
   zh: '向端点取证，审计并修正 llm-pi-ai 的模型能力声明：发现越界的输出上限，补全上下文窗口、推理档位与图像输入支持。'

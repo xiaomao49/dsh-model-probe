@@ -29,16 +29,15 @@ Filling in missing fields is the easy half. Noticing that a field already has a
 
 ## How it gets its answers
 
-Five layers, strongest evidence first. Every conclusion carries its source and a
-confidence label.
+Three evidence sources, strongest first, plus one rule for whatever they fail to
+establish. Every conclusion carries its source and a confidence label.
 
-| Layer | Method | Fields | Cost |
+| # | Method | Fields | Cost |
 | --- | --- | --- | --- |
 | 1 | `GET /models` — what the endpoint says about itself | `contextWindow`, sometimes modalities | 1 request |
 | 2 | **Constraint elicitation** — send a deliberately illegal value, read the legal range out of the error | `maxTokens`, `reasoningEfforts` | **0 output tokens** |
-| 3 | **Behavioural probe** — a randomly generated image, count the shapes | `input` (image support) | ~50 tokens |
-| 4 | Bisection / enumeration when layer 2 yields no readable constraint | as layer 2 | few tokens |
-| 5 | Nothing readable — report `unknown` and **do not write** | — | 0 |
+| 3 | **Behavioural probe** — a randomly generated image, count the shapes | `input` (image support) | ~50 output tokens |
+| — | Nothing readable → report `unknown` and **do not write** | — | 0 |
 
 Layer 2 is the part no other plugin does. Two real error bodies it parses:
 
@@ -50,7 +49,9 @@ Invalid option: expected one of "low"|"medium"|"high"|"xhigh"|"max"
 
 The request is rejected, so no tokens are generated — the endpoint simply tells you
 its own limits. Layer 3 exists because OCR-style gateways answer "what word is in this
-image" without any real vision; counting coloured shapes cannot be faked that way.
+image" without any real vision; counting coloured shapes cannot be faked that way. It is
+skipped when `/models` already reported image support, to save a billed request, and its
+result outranks that self-report — a listing can be stale.
 
 ## Install
 
@@ -137,17 +138,31 @@ dsh plugin --profile web add dsh-model-probe@latest
 
 ## Use
 
-**Settings → 模型配置实测 / Model Config Probe**
+**Settings → 模型配置实测** — "model config probe". The interface ships Chinese labels
+only, so that is the string to look for; the glosses below are translations, not UI text.
 
-1. Switch on **允许探测 / Allow probing** for a provider. Probing is off by default
+1. Switch on **允许探测** ("allow probing") for a provider. Probing is off by default
    and enabled per provider, because it sends real requests to that endpoint.
-2. **扫描 / Scan** — read-only. Shows every field's current value, measured value,
+2. **扫描** ("scan") — read-only. Shows every field's current value, measured value,
    evidence source and confidence.
-3. **确认写入 / Apply** — backs up `settings.yaml`, then writes through
+3. **确认写入** ("apply") — backs up `settings.yaml`, then writes through
    `settings.mutate` with an optimistic lock.
 
 Three tools are also registered for the agent: `model_probe_status`,
 `model_probe_scan`, `model_probe_apply`.
+
+### Configuration
+
+These defaults ship in the bundle patch, under the `model-probe` settings namespace in
+`settings.yaml`. The page's switch and the agent tools write `enabledProviders` through,
+so the file rarely needs editing by hand.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabledProviders` | `[]` | Providers that may be probed. Empty means probing is off everywhere. |
+| `maxRequestsPerScan` | `60` | Request ceiling per scan, so a mis-click cannot become a burst of billed calls. |
+| `visionProbe` | `true` | Run the image probe — the only step that generates output tokens. |
+| `toleranceRatio` | `0.05` | Comparison tolerance for numeric fields (see below). Capped at `0.5`. |
 
 ### Comparison tolerance
 
@@ -193,6 +208,18 @@ fields were actually measured. The fixtures include verbatim error bodies captur
 a real gateway, and a byte-level reimplementation of the settings path-op semantics, so
 writes are validated against the real schema before they are considered correct.
 
+## Changelog
+
+Full history in [CHANGELOG.md](./CHANGELOG.md). Recent releases:
+
+- **0.1.4** — documentation audit. The evidence table listed a bisection layer that never
+  existed in the code, and the English section quoted bilingual UI labels the interface
+  does not have. Adds the changelog and documents the configuration keys.
+- **0.1.3** — a run in which every request failed no longer reports "configuration matches
+  measurement" (the worst bug this plugin could have); host-supplied peers marked
+  optional, so a fresh install no longer ends on `pnpm peers check` exiting 1.
+- **0.1.2** — reads more endpoint error shapes; stops guessing at vision.
+
 ## License
 
 MIT
@@ -218,15 +245,15 @@ MIT
 
 ### 取证方式
 
-五层阶梯，证据强的优先。每个结论都带来源与置信度。
+三个取证来源，证据强的优先；它们都没能确立的字段，统一按最后一条规则处理。每个结论都带
+来源与置信度。
 
 | 层级 | 手段 | 字段 | 成本 |
 | --- | --- | --- | --- |
 | 1 | `GET /models`，端点自述 | `contextWindow`，有时含模态 | 1 次请求 |
 | 2 | **约束取证**：故意发非法值，从报错里读出合法范围 | `maxTokens`、`reasoningEfforts` | **0 输出 token** |
-| 3 | **行为实证**：随机生成图片，数图形 | `input`（图像能力） | 约 50 token |
-| 4 | 第 2 层读不出约束时，二分/枚举探测 | 同第 2 层 | 少量 token |
-| 5 | 都读不出 → 标 `unknown`，**不写入** | — | 0 |
+| 3 | **行为实证**：随机生成图片，数图形 | `input`（图像能力） | 约 50 个输出 token |
+| — | 都读不出 → 标 `unknown`，**不写入** | — | 0 |
 
 第 2 层是其它插件没做的部分。它能解析的真实错误体：
 
@@ -237,7 +264,9 @@ Invalid option: expected one of "low"|"medium"|"high"|"xhigh"|"max"
 ```
 
 请求被拒绝，因此没有 token 被生成——端点只是告诉了你它自己的限制。第 3 层存在的原因：
-OCR 型网关能答对「图里是什么字」却没有真正的视觉能力，而数彩色图形无法这样蒙对。
+OCR 型网关能答对「图里是什么字」却没有真正的视觉能力，而数彩色图形无法这样蒙对。当
+`/models` 自述已含图像支持时这一层会被跳过，以省下一次计费请求；而一旦真跑了实证，它的
+结论优先于端点自述——自述可能过时。
 
 ### 安装
 
@@ -325,6 +354,18 @@ dsh plugin --profile web add dsh-model-probe@latest
 同时为 Agent 注册了三个工具：`model_probe_status`、`model_probe_scan`、
 `model_probe_apply`。
 
+### 配置项
+
+以下默认值随 bundle 补丁发布，位于 `settings.yaml` 的 `model-probe` 命名空间下。设置页的
+开关与 Agent 工具会写 `enabledProviders`，所以基本不需要手工改这个文件。
+
+| 键 | 默认值 | 含义 |
+| --- | --- | --- |
+| `enabledProviders` | `[]` | 允许探测的 provider。空数组表示全部关闭。 |
+| `maxRequestsPerScan` | `60` | 单次扫描的请求数上限，避免一次误点变成一批计费请求。 |
+| `visionProbe` | `true` | 是否做图像实证——唯一产生输出 token 的环节。 |
+| `toleranceRatio` | `0.05` | 数值字段的比较容差（见下）。上限 `0.5`。 |
+
 ### 比较容差
 
 数值字段采用 **5% 比较容差**：当前值已有值且与实测值差距在 5% 以内时保持不动，超过
@@ -342,3 +383,35 @@ dsh plugin --profile web add dsh-model-probe@latest
 - 写入读取**原始用户层**（`settings.describe().user`）而非解析值，schema 默认值绝不会
   被固化进你的配置文件。
 - 没有证据的字段报告为 `unknown` 并保持不动。
+
+### 说明
+
+- provider 路由读自 `llm-pi-ai` 设置命名空间。
+- 支持 `openai-completions` 与 `anthropic-messages` 两种协议的探测。
+- 图像探针用的 PNG 在运行时合成（Node 自带 `zlib` 加自实现的 CRC32），因此本包没有任何
+  图像依赖。
+- 端点的报错措辞并不统一。约束读不出来时字段报告为 `unknown`，不做猜测。
+
+### 测试
+
+```sh
+npm test
+```
+
+106 项。其中含专门钉住「报告口径」的回归：全部取证失败时绝不能渲染成「无需改动」；部分
+取证成功时必须说明究竟量到了几个字段。测试夹具里有从真实网关逐字抓下来的错误体，还有一份
+对设置路径操作语义的逐字节复刻，因此写入在通过之前就已经过真实 schema 校验。
+
+### 更新日志
+
+完整历史见 [CHANGELOG.md](./CHANGELOG.md)。近期版本：
+
+- **0.1.4** —— 文档审计。取证表里列了一层代码中从不存在的「二分/枚举」，英文段引用了界面
+  上并不存在的中英双语标签。补上更新日志并文档化配置项。
+- **0.1.3** —— 所有请求都失败时不再报「配置与实测一致」（这是本插件最不该犯的错）；宿主
+  peer 标为 optional，全新安装不再以 `pnpm peers check` 退出码 1 收尾。
+- **0.1.2** —— 能解析更多端点报错形态；不再猜测图像能力。
+
+### 许可
+
+MIT
