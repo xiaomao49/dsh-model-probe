@@ -54,20 +54,86 @@ image" without any real vision; counting coloured shapes cannot be faked that wa
 
 ## Install
 
-From npm — prebuilt, so the install skips the `allowBuilds` build-approval step:
+> **Pass the profile name your DSH actually boots.** An install into any other name
+> succeeds, exits 0, writes its dependency *and* its `dsh.profile.bundles` entry, and is
+> never loaded. Nothing reports it: the only trace is a single stderr line
+> `dsh: initialized profile web at …` for a profile you never asked to create.
+
+Read the active profile *before* installing:
+
+| Host | Active profile |
+| --- | --- |
+| DSH Desktop (Electron) | `"active"` in `profile-selection/state.json` under the app's user-data directory — on Windows `%APPDATA%\DSH Desktop\profile-selection\state.json` |
+| `dsh` CLI / web | the name you pass to `dsh --profile <name>` (the shipped `web` profile for `dsh web`) |
+
+**On DSH Desktop the answer is not `web`.** The app owns the profile named `desktop`,
+and its in-app plugin market installs into that profile and hot-mounts it — so
+`dsh plugin --profile web …` builds a *separate* profile the app never boots. Current
+`dsh` builds refuse to manage the Electron-owned profile from the command line
+(`profile "desktop" is managed exclusively by the Electron application`), so on those
+builds install from inside the app. Older builds that still accept `--profile desktop`
+are the ones where that name is the right one to use.
+
+Then install — from npm (prebuilt, so the install skips the `allowBuilds`
+build-approval step):
 
 ```sh
 dsh plugin --profile web add dsh-model-probe
 ```
 
-From GitHub:
+or from GitHub:
 
 ```sh
 dsh plugin --profile web add github:xiaomao49/dsh-model-probe
 ```
 
-Then restart DSH. The package is plain JavaScript with no build step, so either
-route installs without a build approval.
+Check where the layer landed — it appears in the composed tree only once the profile is
+both installed and booted:
+
+```sh
+dsh --profile web --dump-config | grep model-probe      # macOS / Linux
+dsh --profile web --dump-config | findstr model-probe   # Windows
+```
+
+`- id: model-probe` means the layer is in place. No output means you are inspecting a
+different profile from the one you installed into — and if that name is not the active
+profile either, nothing will ever load it.
+
+Then **fully quit and restart DSH**. The in-app market hot-mounts and logs
+`{"event":"hot-mount"}` into `<profile>/.dsh-market/log.ndjson`; the CLI does not — it
+only reconciles the profile's dependencies and `dsh.profile.bundles`, and tells you
+nothing about needing a restart, so the plugin shows up after one. The package is plain
+JavaScript with no build step, so either route installs without a build approval.
+
+### The peer-dependency warning (0.1.2 and earlier)
+
+Older versions made pnpm print this during the install:
+
+```
+[WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.
+```
+
+`pnpm peers check` then exited 1, listing `@deepseek-ai/dsh-tools`,
+`@deepseek-ai/schemastery` and `react` as missing — which reads as "the install is
+broken" to anyone seeing it for the first time. It never was. Profiles run with
+`autoInstallPeers: false`, and those packages are supplied at runtime by the DSH
+installation itself, never by the profile: every plugin in a working profile reports the
+same thing. **0.1.3 marks them `peerDependenciesMeta.*.optional`**, so a fresh install is
+silent and `pnpm peers check` exits 0. If you still see the warning — an older pinned
+version, or a profile that has not been re-resolved — it remains informational.
+
+### If you installed before 0.1.3
+
+0.1.2 and earlier could not tell "everything matches" from "nothing was measured": when
+every request failed (`fetch failed` — DNS, refused, reset, TLS), the settings page still
+showed the green *configuration matches measurement, no changes needed*
+(配置与实测一致，无需改动). A total failure presented as a clean bill of health is the
+worst bug this plugin can have. **0.1.3** adds a `verification` block, per-model
+*N unverified* lines, and the real cause behind `fetch failed`. Upgrade with:
+
+```sh
+dsh plugin --profile web add dsh-model-probe@latest
+```
 
 ## Use
 
@@ -121,9 +187,11 @@ rejected outright.
 npm test
 ```
 
-91 tests. The fixtures include verbatim error bodies captured from a real gateway,
-and a byte-level reimplementation of the settings path-op semantics, so writes are
-validated against the real schema before they are considered correct.
+106 tests, including regressions that pin the reporting rules: an all-failed run must
+never render as "nothing to change", and a partially verified run must state how many
+fields were actually measured. The fixtures include verbatim error bodies captured from
+a real gateway, and a byte-level reimplementation of the settings path-op semantics, so
+writes are validated against the real schema before they are considered correct.
 
 ## License
 
@@ -173,19 +241,77 @@ OCR 型网关能答对「图里是什么字」却没有真正的视觉能力，�
 
 ### 安装
 
-从 npm 安装——预构建，免去 `allowBuilds` 构建授权：
+> **`--profile` 必须写你的 DSH 实际启动的那个档位。** 装进别的名字一样会成功：退出码 0、
+> 依赖与 `dsh.profile.bundles` 都写好了，然后永远不会被加载。全程没有任何报错可查——唯一
+> 的痕迹是 stderr 上一行 `dsh: initialized profile web at …`，替你去创建一个你从没打算
+> 要的档位。
+
+安装前先确认当前活动的档位：
+
+| 宿主 | 活动档位怎么看 |
+| --- | --- |
+| DSH Desktop（Electron） | 应用 user-data 目录下 `profile-selection/state.json` 的 `"active"`（Windows 为 `%APPDATA%\DSH Desktop\profile-selection\state.json`） |
+| `dsh` CLI / web | 你 `dsh --profile <name>` 里传的那个名字（`dsh web` 即内置的 `web` 档位） |
+
+**在 DSH Desktop 上，答案不是 `web`。** 应用独占名为 `desktop` 的档位，它内置的插件市集
+就是装进这个档位并热挂载的——所以 `dsh plugin --profile web …` 建出的是应用永远不会启动
+的另一个档位。较新的 `dsh` 直接从命令行拒绝管理这个 Electron 档位——`profile "desktop" is
+managed exclusively by the Electron application`——这类版本请改在应用内（插件市集）安装；
+仍然是老版本、接受 `--profile desktop` 的，那个名字才是对的。
+
+然后安装——从 npm 装（预构建，免去 `allowBuilds` 构建授权）：
 
 ```sh
 dsh plugin --profile web add dsh-model-probe
 ```
 
-从 GitHub 安装：
+或从 GitHub 装：
 
 ```sh
 dsh plugin --profile web add github:xiaomao49/dsh-model-probe
 ```
 
-然后重启 DSH。包是纯 JavaScript、无构建步骤，两种方式都不需要构建授权。
+确认这一层落在哪个档位上——只有「装好且会被启动」的档位，组合树里才看得到它：
+
+```sh
+dsh --profile web --dump-config | grep model-probe      # macOS / Linux
+dsh --profile web --dump-config | findstr model-probe   # Windows
+```
+
+出现 `- id: model-probe` 说明层已就位；没有任何输出，说明你查的档位和你装进去的档位不是
+同一个——而只要它不是活动档位，这个插件就永远不会被加载。
+
+然后**完全退出并重启 DSH**。应用内市集是热挂载的，会在
+`<档位>/.dsh-market/log.ndjson` 里记 `{"event":"hot-mount"}`；CLI 不热挂载——它只负责
+协调档位的依赖与 `dsh.profile.bundles`，也完全不提示需要重启，所以插件要重启后才
+出现。包是纯 JavaScript、无构建步骤，两种方式都不需要构建授权。
+
+### 那条 peer 警告（0.1.2 及更早）
+
+老版本安装时 pnpm 会打印：
+
+```
+[WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.
+```
+
+随后 `pnpm peers check` 退出码为 1，列出 `@deepseek-ai/dsh-tools`、
+`@deepseek-ai/schemastery`、`react` 缺失——第一次看到的人很容易当成装坏了。其实从来不是。
+profile 跑在 `autoInstallPeers: false` 下，而这些包由 DSH 本体在运行时供给，profile 层
+本就不该安装它们：任何一个能正常工作的 profile 报的都是同一批。**0.1.3 已把它们标为
+`peerDependenciesMeta.*.optional`**，因此全新安装不会再打印警告，`pnpm peers check` 退出
+码为 0。如果你仍然看到这条警告——装的是被 pin 住的老版本，或者 profile 还没重新解析——
+它依然只是信息性的。
+
+### 如果你装的是 0.1.3 之前的版本
+
+0.1.2 及更早无法区分「全都一致」和「什么都没测到」：所有请求都失败（`fetch failed`——
+DNS、连接被拒、连接重置、TLS）时，设置页依然显示绿色的「配置与实测一致，无需改动」。
+把彻底失败展示成一张健康证明，正是这个插件最不该犯的错。**0.1.3** 增加了 `verification`
+区块、逐模型的「N 个未取证」提示，以及 `fetch failed` 背后的真实原因。升级：
+
+```sh
+dsh plugin --profile web add dsh-model-probe@latest
+```
 
 ### 使用
 
