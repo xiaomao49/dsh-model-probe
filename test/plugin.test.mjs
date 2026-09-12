@@ -366,3 +366,105 @@ test('policy 路由：读不到任何 provider 时不做收窄（避免读取失
   assert.deepEqual(res.body.policy.enabledProviders, [])
   assert.deepEqual(res.body.policy.staleProviders, ['keep-me'])
 })
+
+// ── 探测专属请求头的保密边界 ────────────────────────────────────────────────
+//
+// probeHeaders 的值会被直接送进 HTTP 头，可能含凭据。插件的既有纪律是"凭据
+// 不出现在任何返回值里"，这条必须同样适用于它——否则一个跑在浏览器里的设置页
+// 就能把凭据读走。
+
+test('状态接口绝不返回 probeHeaders 的值，只回 provider 名', async () => {
+  const secret = 'must-never-appear-in-any-response'
+  const section = {
+    providers: { p1: { baseURL: 'https://x.invalid', api: 'openai-completions', models: [{ id: 'm' }] } },
+  }
+  const { ctx, tools, routes } = makeCtx({ section })
+  apply(ctx, {
+    enabledProviders: ['p1'],
+    probeHeaders: { p1: { 'x-opencode-session': secret, authorization: 'Bearer also-secret' } },
+  })
+
+  // 工具返回值
+  const viaTool = await tools.find((t) => t.name === 'model_probe_status').execute({}, {})
+  assert.equal(JSON.stringify(viaTool).includes(secret), false, '工具返回值不得含探测头值')
+  assert.equal(JSON.stringify(viaTool).includes('also-secret'), false)
+  assert.deepEqual(viaTool.policy.probeHeaderProviders, ['p1'])
+  assert.equal(viaTool.policy.probeHeaders, undefined, '整个 probeHeaders 字段都不得出现在返回值里')
+
+  // HTTP 状态路由
+  const route = routes.find((r) => r.path === '/api/model-probe/status')
+  const res = fakeRes()
+  await route.handler(fakeReq({ method: 'GET' }), res)
+  assert.equal(JSON.stringify(res.body).includes(secret), false, 'HTTP 状态不得含探测头值')
+  assert.deepEqual(res.body.policy.probeHeaderProviders, ['p1'])
+})
+
+test('policy 路由：probeHeaders 的形状被清洗，脏值静默丢弃而不报错', async () => {
+  const section = {
+    providers: { p1: { baseURL: 'https://x.invalid', api: 'openai-completions', models: [] } },
+  }
+  const { ctx, routes } = makeCtx({ section })
+  apply(ctx)
+
+  const route = routes.find((r) => r.path === '/api/model-probe/policy')
+  const res = fakeRes()
+  await route.handler(
+    fakeReq({
+      method: 'POST',
+      body: {
+        probeHeaders: {
+          p1: {
+            'x-good': 'v',
+            'x-empty': '',
+            'x-number': 42,
+            'x-null': null,
+          },
+          p2: 'not-an-object',
+          p3: ['array'],
+          p4: { ok: 'yes' },
+        },
+      },
+    }),
+    res,
+  )
+
+  assert.equal(res.status, 200)
+  // 只报告"哪些 provider 配了头"，不回报任何值。
+  assert.deepEqual(res.body.policy.probeHeaderProviders.sort(), ['p1', 'p4'])
+  assert.equal(JSON.stringify(res.body).includes('"v"'), false)
+})
+
+test('切换开关只走 merge，绝不整段覆盖——否则手写的 probeHeaders 会被抹掉', async () => {
+  // settings.update 的语义是"把 patch 合并进用户层"，replace 才是整段替换。
+  // 插件若误用 replace，一个开关点击就会删掉用户手写的探测头（以及任何它没
+  // 在补丁里重述的字段）。这条钉住的就是这个区别。
+  const calls = { update: [], replace: [] }
+  const config = { enabledProviders: ['p1'], probeHeaders: { p1: { 'x-a': 'v' } } }
+
+  const { ctx, tools, routes } = makeCtx({
+    section: { providers: { p1: { baseURL: 'https://x.invalid', api: 'openai-completions', models: [] } } },
+  })
+  ctx.settings.installSection = (owner, ns, schema, entry, hooks) => {
+    hooks.setSource(() => config)
+  }
+  ctx.settings.update = async (ns, patch) => {
+    calls.update.push(patch)
+    Object.assign(config, patch)
+  }
+  ctx.settings.replace = async (ns, section) => {
+    calls.replace.push(section)
+    return section
+  }
+  apply(ctx, config)
+
+  const route = routes.find((r) => r.path === '/api/model-probe/policy')
+  const res = fakeRes()
+  await route.handler(fakeReq({ method: 'POST', body: { enabledProviders: ['p1'] } }), res)
+  assert.equal(res.status, 200)
+
+  assert.equal(calls.replace.length, 0, '插件不得调用 settings.replace')
+  assert.deepEqual(calls.update, [{ enabledProviders: ['p1'] }], '补丁里只应带被改动的键')
+  // 合并语义下，探测头原样保留。
+  assert.deepEqual(config.probeHeaders, { p1: { 'x-a': 'v' } })
+  assert.deepEqual(res.body.policy.probeHeaderProviders, ['p1'])
+})

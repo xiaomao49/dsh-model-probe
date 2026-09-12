@@ -9,6 +9,50 @@ never got one and links to npm instead. GitHub Releases were first published wit
 so the entries below are reconstructed from those tags, the npm publish times and the
 commit history.
 
+## [0.1.7] — 2026-09-12
+
+### Added
+
+- **`model-probe.probeHeaders` — extra headers for probe requests only.** Some gateways
+  require a header beyond the API key (`https://opencode.ai/zen/go/v1` rejects every
+  request without `x-opencode-session`), and until now the only place to put it was
+  `llm-pi-ai.providers.<id>.headers`. That is the wrong place: DSH sends those on every
+  real model call too, so a static entry there silently **disables** any plugin that
+  derives the header per conversation — the static value wins, and every conversation
+  collapses into one routing/cache-affinity bucket. This field lives in the plugin's own
+  namespace, so probe requests get their header and DSH's calls are untouched.
+
+  ```yaml
+  model-probe:
+    probeHeaders:
+      opencode-go:
+        x-opencode-session: dsh-model-probe
+  ```
+
+  Same-name precedence: an entry here wins over `llm-pi-ai`'s, because it is what you
+  specified for probing.
+
+### Security
+
+- **`probeHeaders` values are never returned.** They may contain credentials, so the
+  status payload and both HTTP routes report only *which providers* have probe headers
+  (`policy.probeHeaderProviders`) — never a name or a value. A regression test asserts
+  that a configured value appears in no tool result and no HTTP response.
+
+### Notes
+
+- Malformed `probeHeaders` shapes are dropped rather than rejected: a typo in one header
+  must not stop the plugin from loading or take the other providers down with it.
+- Toggling a switch still writes through `settings.update` (a merge), so a hand-written
+  `probeHeaders` survives. A regression test now pins that the plugin never calls
+  `settings.replace`.
+
+### Tests
+
+- 140 tests (was 132): header merge and precedence through a real scan, the
+  "only the named provider" boundary, the no-leak guarantee, shape sanitisation, and the
+  merge-not-replace write path.
+
 ## [0.1.6] — 2026-09-12
 
 Three of these four come from one real report: a provider that had been deleted from

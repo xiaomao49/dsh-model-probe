@@ -180,6 +180,31 @@ so the file rarely needs editing by hand.
 | `maxRequestsPerScan` | `60` | Request ceiling per scan, so a mis-click cannot become a burst of billed calls. |
 | `visionProbe` | `true` | Run the image probe — the only step that generates output tokens. |
 | `toleranceRatio` | `0.05` | Comparison tolerance for numeric fields (see below). Capped at `0.5`. |
+| `probeHeaders` | `{}` | Extra headers for probe requests only, per provider: `{ providerId: { header: value } }`. |
+
+### Extra headers for probes
+
+Some gateways require a header beyond the API key. Measured case:
+`https://opencode.ai/zen/go/v1` (Console Go) rejects every request without
+`x-opencode-session`. There are only two places that header can come from, and they
+are not interchangeable:
+
+| Where | Effect |
+| --- | --- |
+| `llm-pi-ai.providers.<id>.headers` | Sent by **every** DSH model call too. If a plugin is already deriving that header per conversation, a static entry here wins and silently disables it — collapsing every conversation into one routing/cache-affinity bucket. |
+| `model-probe.probeHeaders.<id>` | Sent by **this plugin's probe requests only**. DSH's own calls are untouched. |
+
+```yaml
+model-probe:
+  probeHeaders:
+    opencode-go:
+      x-opencode-session: dsh-model-probe
+```
+
+Same-name precedence: an entry here wins over `llm-pi-ai`'s, because it is the value you
+specified for probing. Values may contain credentials, so they are **never** returned
+over the settings API or written to any log — the settings page only reports which
+providers have them.
 
 ### Comparison tolerance
 
@@ -224,7 +249,7 @@ rejected outright.
 npm test
 ```
 
-132 tests, including regressions that pin the reporting rules: an all-failed run must
+140 tests, including regressions that pin the reporting rules: an all-failed run must
 never render as "nothing to change", and a partially verified run must state how many
 fields were actually measured. The fixtures include verbatim error bodies captured from
 a real gateway, and a byte-level reimplementation of the settings path-op semantics, so
@@ -388,6 +413,28 @@ dsh plugin --profile web add dsh-model-probe@latest
 | `maxRequestsPerScan` | `60` | 单次扫描的请求数上限，避免一次误点变成一批计费请求。 |
 | `visionProbe` | `true` | 是否做图像实证——唯一产生输出 token 的环节。 |
 | `toleranceRatio` | `0.05` | 数值字段的比较容差（见下）。上限 `0.5`。 |
+| `probeHeaders` | `{}` | 只用于探测请求的额外头，按 provider 分组：`{ providerId: { header: value } }`。 |
+
+### 探测专属请求头
+
+有些网关除 API key 外还强制要求别的头。实测案例：`https://opencode.ai/zen/go/v1`
+（Console Go）缺 `x-opencode-session` 就一律拒绝。这个头只有两个地方可配，而它们**不
+可互换**：
+
+| 配置位置 | 影响 |
+| --- | --- |
+| `llm-pi-ai.providers.<id>.headers` | DSH 的**每一次**模型调用也会带上。若有插件正在按会话动态推导这个头，这里的静态值会胜出并静默废掉它——所有会话塌缩成同一个路由/缓存亲和桶。 |
+| `model-probe.probeHeaders.<id>` | **只**随本插件的探测请求发出，DSH 自身的调用完全不受影响。 |
+
+```yaml
+model-probe:
+  probeHeaders:
+    opencode-go:
+      x-opencode-session: dsh-model-probe
+```
+
+同名时这里的值优先于 `llm-pi-ai` 的——那是你为探测显式指定的值。这些值可能含凭据，
+因此**绝不**经设置 API 返回、也绝不写进任何日志：设置页只报告哪些 provider 配了它们。
 
 ### 比较容差
 
@@ -425,7 +472,7 @@ dsh plugin --profile web add dsh-model-probe@latest
 npm test
 ```
 
-132 项。其中含专门钉住「报告口径」的回归：全部取证失败时绝不能渲染成「无需改动」；部分
+140 项。其中含专门钉住「报告口径」的回归：全部取证失败时绝不能渲染成「无需改动」；部分
 取证成功时必须说明究竟量到了几个字段。测试夹具里有从真实网关逐字抓下来的错误体，还有一份
 对设置路径操作语义的逐字节复刻，因此写入在通过之前就已经过真实 schema 校验。
 
