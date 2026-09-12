@@ -9,6 +9,41 @@ never got one and links to npm instead. GitHub Releases were first published wit
 so the entries below are reconstructed from those tags, the npm publish times and the
 commit history.
 
+## [0.1.9] — 2026-09-12
+
+### Fixed
+
+- **「确认写入」不再报「已修正 0 处」。** The apply path re-ran the scan with the vision
+  probe deliberately disabled — its comment claimed the previous scan's conclusion would
+  be reused, but nothing ever carried it over. `input` is established **only** by that
+  probe, so the field could never be written: the page listed `input → 实测支持图像`
+  and pressing confirm reported zero changes, with no error to explain it.
+
+  Apply now writes **the scan you just reviewed**, cached per provider together with the
+  `llm-pi-ai` revision it was taken at. Re-probing was avoided for two reasons, and both
+  still hold: the image probe costs output tokens, and a behavioural probe can return a
+  different verdict the second time (image conclusions have been observed flipping), so
+  re-scanning can write something other than what was on screen. When no reviewed scan is
+  available — a fresh process, or the agent calling `model_probe_apply` directly — apply
+  now runs a **complete** scan including the vision probe instead of silently dropping the
+  field. A changed revision invalidates the cache, because evidence is only valid for the
+  configuration it was taken against. The response reports which it used
+  (`evidence: reviewed-scan | fresh-scan`).
+
+### Changed
+
+- **The startup line no longer contradicts itself.** It used to print
+  `探测当前开启：cc-goat, opencode-go` and, one line later, that it could not read the
+  provider list at all — both true, together nonsense. When the layer was not readable at
+  load time it now says so in the same sentence and calls the list what it is: the
+  whitelist, uncross-checked.
+
+### Tests
+
+- 145 tests (was 142): applying reuses the reviewed scan (the vision-only field lands, and
+  no second image request goes out), applying without one probes afresh, and a changed
+  revision invalidates the cache.
+
 ## [0.1.8] — 2026-09-12
 
 ### Fixed

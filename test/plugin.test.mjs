@@ -505,3 +505,120 @@ test('回归：确实读到了配置、而 provider 真被删掉时，照常报�
   assert.deepEqual(result.policy.staleProviders, ['ghost'], '读得到配置时，残留必须照实报')
   assert.deepEqual(result.policy.enabledProviders, ['real'])
 })
+
+// ── 写入必须使用「刚审阅过的那次扫描」的证据 ──────────────────────────────────
+//
+// 实际撞到的 bug：界面扫描列着「input 实测支持图像」，点确认写入却报「已修正 0 处」。
+// 根因是应用阶段无条件重扫、并且关掉了视觉探针——而 input 只在视觉探针里取证，
+// 关掉它这个字段就永远写不进去，注释却写着「结论已在上一次扫描得到」。
+
+/** 能回答三个取证层次的最小端点替身，并记录是否出现过图像请求。 */
+function makeEndpointStub() {
+  const seen = { imageRequests: 0, requests: 0 }
+  const fetchImpl = (url, init) => {
+    seen.requests += 1
+    const body = init?.body === undefined ? undefined : JSON.parse(init.body)
+    const json = (payload, status = 200) => new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
+
+    if (init?.method !== 'POST') return Promise.resolve(json({ data: [{ id: 'm1' }] }))
+    const content = body?.messages?.[0]?.content
+    if (Array.isArray(content) && content.some((p) => p?.type === 'image_url')) {
+      seen.imageRequests += 1
+      // 恒定答错（探针的目标图形数恒为 2..5，永不为 0）→ 两次复核均错 →
+      // 结论为「不支持图像」，于是 input 事实是 ["text"]。
+      return Promise.resolve(json({ choices: [{ message: { content: '0' } }], usage: { completion_tokens: 1 } }))
+    }
+    if (body?.reasoning_effort !== undefined) {
+      return Promise.resolve(json({ error: { message: 'expected one of `low`, `high`' } }, 400))
+    }
+    return Promise.resolve(json({ error: { message: 'Invalid max_tokens value, the valid range of max_tokens is [1, 4096]' } }, 400))
+  }
+  return { fetchImpl, seen }
+}
+
+/** 在替换了 fetch 的环境里跑一段用例。 */
+async function withEndpoint(stub, fn) {
+  const original = globalThis.fetch
+  globalThis.fetch = stub.fetchImpl
+  try {
+    return await fn()
+  } finally {
+    globalThis.fetch = original
+  }
+}
+
+function applyCtx(section, revision = 7) {
+  const holder = { revision }
+  const { ctx, tools, routes } = makeCtx({ section })
+  ctx.settings.describe = () => [{ ns: 'llm-pi-ai', revision: holder.revision, user: section }]
+  // 只补 credentials，其余键仍走 makeCtx 的原实现——否则 webServer 拿不到，
+  // 路由根本不会注册。
+  const baseGet = ctx.get
+  ctx.get = (key) => (key === 'credentials' ? { resolve: async () => ({ value: 'k' }) } : baseGet(key))
+  return { ctx, routes, holder }
+}
+
+/**
+ * 每个用例用独立的 provider 名。插件状态是模块级共享的，扫描缓存按 provider 键存，
+ * 复用同一个名字会让上一个用例留下的缓存泄漏进来——这正是前两版测试踩到的坑。
+ */
+const sectionFor = (name) => ({
+  providers: { [name]: { baseURL: 'https://x.invalid/v1', api: 'openai-completions', apiKeyEnv: 'K', models: [{ id: 'm1' }] } },
+})
+
+test('写入复用刚审阅过的扫描：视觉结论能落盘，且不重复打图像请求', async () => {
+  const stub = makeEndpointStub()
+  const { ctx, routes, holder } = applyCtx(sectionFor('apply-a'))
+  apply(ctx, { enabledProviders: ['apply-a'] })
+
+  await withEndpoint(stub, async () => {
+    const scanRes = fakeRes()
+    await routes.find((r) => r.path === '/api/model-probe/scan').handler(fakeReq({ method: 'POST', body: { provider: 'apply-a' } }), scanRes)
+    assert.equal(scanRes.body.verification.verifiedFields > 0, true, '扫描应当取证成功')
+    const imageDuringScan = stub.seen.imageRequests
+    assert.ok(imageDuringScan > 0, '扫描阶段应当做过图像实证')
+
+    const applyRes = fakeRes()
+    await routes.find((r) => r.path === '/api/model-probe/apply').handler(fakeReq({ method: 'POST', body: { provider: 'apply-a', confirm: true } }), applyRes)
+
+    assert.equal(applyRes.status, 200)
+    assert.equal(applyRes.body.evidence, 'reviewed-scan', '应当复用刚审阅的扫描')
+    assert.equal(stub.seen.imageRequests, imageDuringScan, '复用证据时不该再打图像请求')
+    // 三项都能落盘——其中 input 只在视觉探针里取证，修复前它永远写不进去。
+    assert.deepEqual(applyRes.body.changes.map((c) => c.field).sort(), ['input', 'maxTokens', 'reasoningEfforts'])
+  })
+})
+
+test('没有可复用的扫描时，写入前会完整取证（含视觉探针），input 照样写得进去', async () => {
+  const stub = makeEndpointStub()
+  const { ctx, routes } = applyCtx(sectionFor('apply-b'))
+  apply(ctx, { enabledProviders: ['apply-b'] })
+
+  await withEndpoint(stub, async () => {
+    const applyRes = fakeRes()
+    await routes.find((r) => r.path === '/api/model-probe/apply').handler(fakeReq({ method: 'POST', body: { provider: 'apply-b', confirm: true } }), applyRes)
+
+    assert.equal(applyRes.body.evidence, 'fresh-scan')
+    assert.ok(stub.seen.imageRequests > 0, '无缓存时必须自己取证，不能关掉视觉探针')
+    assert.deepEqual(applyRes.body.changes.map((c) => c.field).sort(), ['input', 'maxTokens', 'reasoningEfforts'])
+  })
+})
+
+test('配置在扫描之后被改过时，缓存失效、写入前重新取证', async () => {
+  const stub = makeEndpointStub()
+  const { ctx, routes, holder } = applyCtx(sectionFor('apply-c'))
+  apply(ctx, { enabledProviders: ['apply-c'] })
+
+  await withEndpoint(stub, async () => {
+    await routes.find((r) => r.path === '/api/model-probe/scan').handler(fakeReq({ method: 'POST', body: { provider: 'apply-c' } }), fakeRes())
+    const imageDuringScan = stub.seen.imageRequests
+
+    holder.revision = 8 // 配置动过了
+
+    const applyRes = fakeRes()
+    await routes.find((r) => r.path === '/api/model-probe/apply').handler(fakeReq({ method: 'POST', body: { provider: 'apply-c', confirm: true } }), applyRes)
+
+    assert.equal(applyRes.body.evidence, 'fresh-scan', '过期证据不得复用')
+    assert.ok(stub.seen.imageRequests > imageDuringScan, '过期后必须重新取证')
+  })
+})
