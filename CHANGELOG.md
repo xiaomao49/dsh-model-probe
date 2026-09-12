@@ -9,6 +9,27 @@ never got one and links to npm instead. GitHub Releases were first published wit
 so the entries below are reconstructed from those tags, the npm publish times and the
 commit history.
 
+## [0.1.8] — 2026-09-12
+
+### Fixed
+
+- **The startup diagnostics no longer claim your providers were deleted.** `apply()` reads
+  settings while the `llm-pi-ai` namespace is usually still unregistered, so
+  `readPiSection` falls back to `{ providers: {} }`. The stale-provider check added in
+  0.1.6 read that empty list as "every whitelisted provider is gone" and printed
+  `探测白名单里有 2 个 provider 已不在 llm-pi-ai 配置中：cc-goat, opencode-go` on a
+  configuration that was completely fine. The intersection is now only computed when the
+  raw user layer was actually read; otherwise the whitelist is passed through untouched
+  and the log says it could not read the layer this time. The live settings page was
+  never affected — it re-reads on every open — but a diagnostic that invents deletions is
+  worse than no diagnostic.
+
+### Tests
+
+- 142 tests (was 140): one pins the unreadable case (no stale claim, whitelist
+  preserved), one pins the readable case (a genuinely deleted provider is still
+  reported).
+
 ## [0.1.7] — 2026-09-12
 
 ### Added

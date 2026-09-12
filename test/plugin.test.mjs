@@ -468,3 +468,40 @@ test('切换开关只走 merge，绝不整段覆盖——否则手写的 probeHe
   assert.deepEqual(config.probeHeaders, { p1: { 'x-a': 'v' } })
   assert.deepEqual(res.body.policy.probeHeaderProviders, ['p1'])
 })
+
+test('回归：读不到 llm-pi-ai 配置时，绝不能宣称白名单里的 provider 已被删除', async () => {
+  // 实测摔过的坑：插件在 apply() 里读设置时，llm-pi-ai 命名空间往往还没注册，
+  // readPiSection 回退成 { providers: {} }，交集为空被当成"全都已被删除"，
+  // 启动日志因此写着「探测白名单里有 2 个 provider 已不在 llm-pi-ai 配置中」——
+  // 而它们配置得好好的。读不到的诚实说法是"不知道"。
+  const ctx = {
+    settings: {
+      // describe 有这一行但 user 为空：模拟"用户层此刻不可读"
+      describe: () => [{ ns: 'llm-pi-ai', revision: 1, user: null }],
+      get: () => undefined,
+      mutate: async () => {},
+    },
+    tools: { register: () => {} },
+    get: () => undefined,
+    effect: () => {},
+    logger: { info: () => {}, debug: () => {}, warn: () => {} },
+  }
+  const tools = []
+  ctx.tools.register = (def) => tools.push(def)
+  apply(ctx, { enabledProviders: ['cc-goat', 'opencode-go'] })
+
+  const result = await tools.find((t) => t.name === 'model_probe_status').execute({}, {})
+  assert.deepEqual(result.policy.staleProviders, [], '读不到配置时不得宣称它们被删除')
+  // 白名单原样保留：我们只是无法确认，而不是要替用户清空授权。
+  assert.deepEqual(result.policy.enabledProviders, ['cc-goat', 'opencode-go'])
+})
+
+test('回归：确实读到了配置、而 provider 真被删掉时，照常报告残留', async () => {
+  const section = { providers: { real: { baseURL: 'https://x.invalid', api: 'openai-completions', models: [] } } }
+  const { ctx, tools } = makeCtx({ section })
+  apply(ctx, { enabledProviders: ['real', 'ghost'] })
+
+  const result = await tools.find((t) => t.name === 'model_probe_status').execute({}, {})
+  assert.deepEqual(result.policy.staleProviders, ['ghost'], '读得到配置时，残留必须照实报')
+  assert.deepEqual(result.policy.enabledProviders, ['real'])
+})
