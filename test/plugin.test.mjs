@@ -8,7 +8,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { apply, name, inject, POLICY_NS } from '../lib/index.js'
+import { apply, name, inject, POLICY_NS, PolicySchema } from '../lib/index.js'
 
 /** 构造一个最小可用的 ctx，记录所有注册动作。 */
 function makeCtx({ section = { providers: {} }, withWebServer = true } = {}) {
@@ -620,5 +620,86 @@ test('配置在扫描之后被改过时，缓存失效、写入前重新取证',
 
     assert.equal(applyRes.body.evidence, 'fresh-scan', '过期证据不得复用')
     assert.ok(stub.seen.imageRequests > imageDuringScan, '过期后必须重新取证')
+  })
+})
+
+// ── 畸形的 probeHeaders 不得掀翻整张策略表 ──────────────────────────────────
+//
+// schema 用严格嵌套字典时，settings.yaml 里手写错一个头的形状就会让整个
+// model-probe 命名空间安装失败——后果不只是这个头被忽略，而是 enabledProviders
+// 一起失效、开关再也存不下来。逐条丢弃比整体报错合适。
+
+test('probeHeaders 形状畸形时逐条丢弃，其余策略照常生效', async () => {
+  const installed = {
+    enabledProviders: ['p1'],
+    maxRequestsPerScan: 12,
+    probeHeaders: {
+      p1: { 'x-good': 'v', 'x-number': 42, 'x-empty': '', 'x-null': null },
+      p2: 'not-an-object',
+      p3: ['array'],
+    },
+  }
+  const { ctx, tools } = makeCtx({
+    section: { providers: { p1: { baseURL: 'https://x.invalid', api: 'openai-completions', models: [] } } },
+  })
+  ctx.settings.installSection = (owner, ns, schema, entry, hooks) => {
+    // 真宿主会用 schema 解析用户层；这里模拟"解析结果就是这份含畸形的对象"。
+    hooks.setSource(() => installed)
+  }
+  apply(ctx)
+
+  const result = await tools.find((t) => t.name === 'model_probe_status').execute({}, {})
+  // 畸形的那几条被丢掉，好的留下；p2/p3 整体无效 → 整个 provider 条目丢弃。
+  assert.deepEqual(result.policy.probeHeaderProviders, ['p1'])
+  // 同一份策略里的其它字段不受影响——这正是严格 schema 会毁掉的部分。
+  assert.deepEqual(result.policy.enabledProviders, ['p1'])
+  assert.equal(result.policy.maxRequestsPerScan, 12)
+  // 值本身依旧不出现在返回值里。
+  assert.equal(JSON.stringify(result).includes('"v"'), false)
+})
+
+test('probeHeaders 整体不是对象时退回空表，不影响其余策略', async () => {
+  const { ctx, tools } = makeCtx({
+    section: { providers: { p1: { baseURL: 'https://x.invalid', api: 'openai-completions', models: [] } } },
+  })
+  ctx.settings.installSection = (owner, ns, schema, entry, hooks) => {
+    hooks.setSource(() => ({ enabledProviders: ['p1'], probeHeaders: 'nope' }))
+  }
+  apply(ctx)
+
+  const result = await tools.find((t) => t.name === 'model_probe_status').execute({}, {})
+  assert.deepEqual(result.policy.probeHeaderProviders, [])
+  assert.deepEqual(result.policy.enabledProviders, ['p1'])
+})
+
+test('schema 本身对畸形 probeHeaders 不再抛错（否则整个命名空间装不上）', () => {
+  for (const bad of [{ p1: 'oops' }, { p1: ['x'] }, { p1: { h: 42 } }, { p1: { h: null } }, 'nope', 42]) {
+    const parsed = PolicySchema({ probeHeaders: bad })
+    // 解析必须成功；畸形内容由 normalizeProbeHeaders 事后丢弃。
+    assert.ok(parsed !== undefined)
+    assert.equal(parsed.enabledProviders !== undefined, true, '其它字段仍应有默认值')
+  }
+})
+
+test('写入需要重新取证时，与扫描共用并发闸（避免并发打两轮计费请求）', async () => {
+  const stub = makeEndpointStub()
+  const section = sectionFor('apply-d')
+  const { ctx, routes } = applyCtx(section)
+  apply(ctx, { enabledProviders: ['apply-d'] })
+
+  await withEndpoint(stub, async () => {
+    // 手工把扫描闸置为占用：模拟"扫描还在跑"。
+    const scanPromise = routes
+      .find((r) => r.path === '/api/model-probe/scan')
+      .handler(fakeReq({ method: 'POST', body: { provider: 'apply-d' } }), fakeRes())
+    const applyRes = fakeRes()
+    await routes
+      .find((r) => r.path === '/api/model-probe/apply')
+      .handler(fakeReq({ method: 'POST', body: { provider: 'apply-d', confirm: true } }), applyRes)
+    await scanPromise
+
+    assert.equal(applyRes.status, 400)
+    assert.match(applyRes.body.error, /已有扫描在进行中/)
+    assert.equal(applyRes.body.ok, false)
   })
 })

@@ -9,6 +9,48 @@ never got one and links to npm instead. GitHub Releases were first published wit
 so the entries below are reconstructed from those tags, the npm publish times and the
 commit history.
 
+## [0.1.10] — 2026-09-12
+
+A review pass over the whole flow after 0.1.9. Four things, all found by re-reading the
+code rather than by a failure report.
+
+### Fixed
+
+- **A malformed `probeHeaders` can no longer take the whole policy down with it.** The
+  schema was a strict nested dict, so a typo in `settings.yaml` (`probeHeaders: {p1:
+  "oops"}`) made the `model-probe` namespace fail to install — which does not just ignore
+  that one header, it drops `enabledProviders` too and stops the switches from persisting,
+  behind an error message that only talks about schemastery internals. The field is now
+  permissive at the schema layer and sanitised entry by entry, which is what the README
+  promised all along. The settings path was also bypassing `normalizePolicy` entirely, so
+  that promise had only ever held for the composition config.
+- **The scan cache records the revision from *before* the scan, not after.** A scan takes
+  seconds and several requests; taking the revision at the end would label evidence
+  gathered under the old configuration as valid for the new one — and that label is
+  exactly what decides whether a write reuses the cache. Taking it at the start can only
+  fail safe: re-scan rather than write stale evidence.
+- **Writing no longer resolves a credential it will not use.** When the reviewed scan is
+  reused nothing is sent, and the credential seam is now only touched on the branch that
+  actually makes requests.
+
+### Added
+
+- **Writing shares the scan concurrency gate.** `runApply` called `scanProvider` directly
+  when it had to re-probe, so "write while a scan is still running" could fire two rounds
+  of billed requests. It now refuses with a clear message instead.
+
+### Documentation
+
+- The README's Use section states where the write's evidence comes from, and the
+  `model_probe_apply` tool description now matches what the code does instead of
+  requiring a prior scan that it no longer needs.
+
+### Tests
+
+- 149 tests (was 145): malformed `probeHeaders` is dropped without disturbing the rest of
+  the policy, the schema no longer throws on it, and the write path refuses to re-probe
+  while a scan is in flight.
+
 ## [0.1.9] — 2026-09-12
 
 ### Fixed

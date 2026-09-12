@@ -165,6 +165,15 @@ only, so that is the string to look for; the glosses below are translations, not
 3. **确认写入** ("apply") — backs up `settings.yaml`, then writes through
    `settings.mutate` with an optimistic lock.
 
+The write uses **the scan you just reviewed**. While the configuration has not changed
+since, that scan is reused as-is — no second round of probe requests, so what lands on
+disk is what was on screen. A behavioural probe (the image test) can answer differently
+the second time, and evidence is only valid for the configuration it was taken against,
+so a changed revision makes the cache stale by design. With no reviewed scan at all — a
+fresh process, or the agent calling `model_probe_apply` on its own — a complete scan runs
+first, image probe included. The response reports which was used:
+`evidence: reviewed-scan | fresh-scan`.
+
 Three tools are also registered for the agent: `model_probe_status`,
 `model_probe_scan`, `model_probe_apply`.
 
@@ -398,6 +407,12 @@ dsh plugin --profile web add dsh-model-probe@latest
    发真实请求。
 2. **扫描**——只读。列出每个字段的当前值、实测值、证据来源与置信度。
 3. **确认写入**——先备份 `settings.yaml`，再通过 `settings.mutate` 带乐观锁写入。
+
+写入用的是**你刚看过的那次扫描**。配置在扫描之后没动过，就直接复用它——不再发第二轮
+探测请求，于是落盘的就是屏幕上显示的那一份。行为型探针（图像实证）第二次可能给出不同
+答案，而证据只对它取证时的那份配置有效，所以修订号一变缓存即失效，这是刻意的。完全
+没有可复用的扫描时（新进程、或 Agent 直接调 `model_probe_apply`），会先完整取证，包含
+图像实证。返回值会说明用的是哪一次：`evidence: reviewed-scan | fresh-scan`。
 
 同时为 Agent 注册了三个工具：`model_probe_status`、`model_probe_scan`、
 `model_probe_apply`。
