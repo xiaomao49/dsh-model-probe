@@ -9,6 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { makeVisionProbe } from '../lib/png.js'
+import { extractDeclaredCount, probeVision } from '../lib/probe.js'
 
 /**
  * 对原始 RGB 缓冲做连通域计数：统计"非背景且颜色接近指定色"的独立斑块数量。
@@ -94,8 +95,6 @@ test('探针图的图形数量必须等于 ground truth（连通域计数）', (
 // 实测 deepseek-v4-pro 收到图片后回答 "I can't see the image, so I can't count
 // the yellow circles." —— HTTP 200、finish=stop、无任何报错。若把这种回答当成
 // "读不出数字"的无结论，就漏掉了真实问题：声明了图像能力，图片却被静默忽略。
-
-import { probeVision } from '../lib/probe.js'
 
 /** 构造一个只返回指定文本的假端点。 */
 function stubEndpoint(text, { finish = 'stop' } = {}) {
@@ -202,7 +201,9 @@ test('正文被推理占满时自动加大额度重试一次', async () => {
   }
 })
 
-test('非额度原因的失败不重试（避免无谓请求）', async () => {
+test('读不出数字不重发同一张图，而是交给差异探针（避免无谓请求）', async () => {
+  // 该 stub 的输出形状对两个阶段都不合格式：计数阶段读不出数字、交叉核对阶段
+  // 读不出 IMAGE_n 标注。因此只应产生计数 3 次 + 交叉核对 1 次，绝不原地重试。
   const stub = stubEndpoint('这是一段没有数字的回答')
   try {
     const r = await probeVision({
@@ -213,8 +214,8 @@ test('非额度原因的失败不重试（避免无谓请求）', async () => {
       budget: { spend() {}, addTokens() {} },
     })
     assert.equal(r.ok, false)
-    assert.match(r.reason, /无法从回答中读出数字/)
-    assert.equal(stub.calls.length, 1, '不应重试')
+    assert.match(r.reason, /交叉核对未读出两个 IMAGE_n 标注/)
+    assert.equal(stub.calls.length, 4, `计数 3 次 + 差异探针 1 次，实际 ${stub.calls.length}`)
   } finally {
     stub.restore()
   }
@@ -292,13 +293,14 @@ test('答对一个非零错数：换图复核，第二次答对则判支持', as
   }
 })
 
-test('两次都答错非零值：判不支持', async () => {
-  // 确保"保护真有视觉的模型"不会滑向"永远不下结论"。
+test('两次都答错非零值：交叉核对也证明不了"看得见"，则不下"支持图像"的结论', async () => {
+  // 确保"保护真有视觉的模型"不会滑向"把瞎猜当视觉"。恒定给一个非零错数
+  // （1 永远不可能是正确答案，因为数量是 2..5）—— 计数三次都错，接着的差异
+  // 探针两次读数也相同，说明读数没有跟着图像内容变化。此时仍不得声称支持图像。
   const original = globalThis.fetch
   let n = 0
   globalThis.fetch = async () => {
     n += 1
-    // 恒定给一个非零错数（1 永远不可能是正确答案，因为数量是 2..5）
     return new Response(
       JSON.stringify({
         choices: [{ message: { content: '1' }, finish_reason: 'stop' }],
@@ -315,10 +317,97 @@ test('两次都答错非零值：判不支持', async () => {
       model: 'm',
       budget: { spend() {}, addTokens() {} },
     })
-    assert.equal(n, 2, '应复核两次')
+    assert.equal(n, 4, '计数三次 + 差异探针一次')
+    assert.equal(r.ok, false, `不得凭瞎猜判支持：${JSON.stringify(r)}`)
+    assert.match(r.reason, /交叉核对未读出两个 IMAGE_n 标注/)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('回归 0.1.10：枚举式叙述不得把列表序号当答案', async () => {
+  // 实测 deepseek/deepseek-v4.1-flash 会对探针图按序描述：
+  //   "… 1. A yellow circle 2. A blue square … Therefore, the answer is **3**."
+  // 旧解析取"第一个数字"，读到列表序号 1，把正确答案读成错答；两次误读之后
+  // 插件报出"实测 text"，把该模型的图像能力判反了。答案只认显式声明。
+  const enumerated =
+    'Looking at the image from left to right, I see four shapes:\n\n' +
+    '1. A yellow circle\n2. A blue square\n3. A yellow circle\n4. A blue square\n\n' +
+    'Ignoring the blue squares, the yellow circles number 2.\n\n' +
+    'Therefore, the answer is **2**.'
+  assert.equal(extractDeclaredCount(enumerated), 2, '取声明值，不取列表序号')
+})
+
+test('回归 0.1.10：探针末行格式 TOTAL=<digit> 必须被优先识别', async () => {
+  assert.equal(extractDeclaredCount('Counting them: 1, 2, 3.\nTOTAL=3'), 3)
+  assert.equal(extractDeclaredCount('TOTAL = 4'), 4)
+  assert.equal(extractDeclaredCount('答案：5'), 5)
+  // 没有声明标记时退化为"最后一个独立数字"，仍不得取到列表序号。
+  assert.equal(extractDeclaredCount('1. red circle\n2. blue square\n3. red circle\n总共有 2 个'), 2)
+})
+
+test('交叉核对：读数随图像变化即判定支持图像（即使数不准）', async () => {
+  // 计数三次都读不出正确答案，但差异探针两次读数不同 —— 说明回答确实来自像素。
+  const original = globalThis.fetch
+  let n = 0
+  globalThis.fetch = async () => {
+    n += 1
+    const body =
+      n <= 3
+        ? '1' // 计数三次均答错（数量恒为 2..5）
+        : 'IMAGE_1=2\nIMAGE_2=5'
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: body }, finish_reason: 'stop' }],
+        usage: { completion_tokens: 5 },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  }
+  try {
+    const r = await probeVision({
+      baseURL: 'https://x.invalid/v1',
+      api: 'openai-completions',
+      apiKey: 'k',
+      model: 'm',
+      budget: { spend() {}, addTokens() {} },
+    })
+    assert.equal(n, 4, '计数三次 + 差异探针一次')
+    assert.equal(r.ok, true, `应给出结论：${JSON.stringify(r)}`)
+    assert.equal(r.supportsImage, true)
+    assert.match(r.raw, /读数随图像变化/)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('读不出数字只是"无结论"，不得被当成"看不到图"', async () => {
+  // 模型答了一段叙述却没有数字：这是无结论，必须继续换图复核，绝不能据此判
+  // "不支持图像"（代价不对称：判错会让 DSH 永久拒收图片）。
+  const original = globalThis.fetch
+  let n = 0
+  globalThis.fetch = async () => {
+    n += 1
+    const body = n <= 3 ? '我看不清这张图里有什么。' : 'IMAGE_1=3\nIMAGE_2=2'
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content: body }, finish_reason: 'stop' }],
+        usage: { completion_tokens: 5 },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )
+  }
+  try {
+    const r = await probeVision({
+      baseURL: 'https://x.invalid/v1',
+      api: 'openai-completions',
+      apiKey: 'k',
+      model: 'm',
+      budget: { spend() {}, addTokens() {} },
+    })
+    assert.equal(n, 4, '读不出数字应换图复核，而不是直接下结论')
     assert.equal(r.ok, true)
-    assert.equal(r.supportsImage, false)
-    assert.match(r.raw, /两次换图复核均数错/)
+    assert.equal(r.supportsImage, true, '差异探针读数不同即可确认支持')
   } finally {
     globalThis.fetch = original
   }

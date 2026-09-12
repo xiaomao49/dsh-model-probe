@@ -9,6 +9,45 @@ never got one and links to npm instead. GitHub Releases were first published wit
 so the entries below are reconstructed from those tags, the npm publish times and the
 commit history.
 
+## [0.1.11] — 2026-09-12
+
+### Fixed
+
+- **A correct answer could be read as a wrong one, and two of those turned into "this
+  model cannot see images".** Reported from a real scan: the settings page showed
+  `deepseek/deepseek-v4.1-flash` as `text / image → text` while the model was, in fact,
+  reading images in the very same session. The endpoint was never the problem — the
+  answer parser was. When a model describes an image as a numbered list
+  (`1. A yellow circle 2. A blue square 3. A yellow circle …`), taking the *first*
+  integer picks up the list marker `1`; the count the model actually declared
+  (`Therefore, the answer is **3**`) sat at the end of the same string. Measured against
+  the live endpoint, this misfired on **4 of 14** probes (28.6%), and two misfires in a
+  row produced the verdict "两次换图复核均数错（期望 3），判定为不支持图像输入" — a
+  capability that was declared, actually present, and wrongly denied. Because `pi-ai`
+  refuses images before attaching them, that verdict permanently disables image input for
+  a model that supports it, so the asymmetry here is severe.
+  The probe question now pins the answer format (`TOTAL=<digit>` on its own final line),
+  and the parser reads, in order: the explicitly declared answer (`TOTAL=`, "the answer
+  is", "there are", "答案是"), then the last standalone integer. Reading the first integer
+  is never used again.
+- **"Miscounted" is no longer evidence of "cannot see".** The old verdict turned two
+  wrong counts into `input: text`; a model that can see but counts coloured shapes badly
+  looks identical to one that is guessing. This is now decided by a **differential
+  probe**: two images that differ *only* in how many target shapes they contain, asking
+  for `IMAGE_1=<digit>` / `IMAGE_2=<digit>`. Differing readings prove the answer comes
+  from the pixels; identical readings across two different images do not, and the result
+  is reported as *unconfirmed* rather than as a denial. Guessing a wrong number can no
+  longer flip a declared capability off.
+- **A response with no readable number is retried with a new image instead of ending the
+  probe.** Reading no digit means "no conclusion from this attempt", not "no vision".
+
+### Tests
+
+- 153 tests (was 149): regressions for the enumerated-answer misread and for the
+  `TOTAL=` format, plus the two differential-probe outcomes (readings differ → supported;
+  readings identical → unconfirmed). The old test that asserted "two wrong counts → not
+  supported" was replaced, since that behaviour was the bug.
+
 ## [0.1.10] — 2026-09-12
 
 A review pass over the whole flow after 0.1.9. Four things, all found by re-reading the

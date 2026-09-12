@@ -345,6 +345,39 @@ test('端到端：用真实扫描夹具走完 planOps → 写入 → schema 校�
   }
 })
 
+test('回归 0.1.10：实测支持图像时，input 不得被列为待修正项', async () => {
+  // 真实事故：cc-goat 的 deepseek/deepseek-v4.1-flash 明明能看图，视觉探针却因
+  // 答案解析读错数字而判成"实测 text"，界面上随即出现一条把 input 砍成 ['text']
+  // 的修正 —— 采纳它就会让 DSH 在这个模型上永久拒收图片。夹具是当时那次真实
+  // 扫描的结论，input 实测为 text+image；这里锁死"它不产生任何写入"。
+  const { readFileSync } = await import('node:fs')
+  const { fileURLToPath } = await import('node:url')
+  const { dirname, join } = await import('node:path')
+  const { planOps, describeOps } = await import('../lib/scan.js')
+
+  const here = dirname(fileURLToPath(import.meta.url))
+  const fixture = JSON.parse(readFileSync(join(here, 'fixtures', 'scan-response.json'), 'utf8'))
+
+  const inputFindings = fixture.scan.models.flatMap((m) =>
+    (m.findings ?? []).filter((f) => f.field === 'input'),
+  )
+  assert.ok(inputFindings.length > 0, '夹具必须包含 input 的实测结论')
+  for (const f of inputFindings) {
+    assert.equal(f.verdict, 'ok', `input 实测支持时不得报 mismatch：${JSON.stringify(f)}`)
+    assert.ok(f.measured.includes('image'), `实测值必须含 image：${JSON.stringify(f)}`)
+  }
+
+  const section = makeSection()
+  const scan = { ok: true, provider: 'cc-goat', models: fixture.scan.models, rawModels: section.providers['cc-goat'].models }
+  const ops = planOps(scan)
+  for (const op of ops) {
+    assert.doesNotMatch(String(op.path), /input/, `不得产生改写 input 的操作：${JSON.stringify(op)}`)
+  }
+  for (const row of describeOps(ops, scan)) {
+    assert.notEqual(row.field, 'input', '预览里不得出现 input 行')
+  }
+})
+
 test('端到端：配置已一致时不产生任何操作', async () => {
   const { readFileSync } = await import('node:fs')
   const { fileURLToPath } = await import('node:url')
