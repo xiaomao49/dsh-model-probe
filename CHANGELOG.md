@@ -9,6 +9,60 @@ never got one and links to npm instead. GitHub Releases were first published wit
 so the entries below are reconstructed from those tags, the npm publish times and the
 commit history.
 
+## [0.1.6] — 2026-09-12
+
+Three of these four come from one real report: a provider that had been deleted from
+the model configuration still showed up as "probing enabled", and a second provider
+could not be probed at all — every field came back `unknown`.
+
+### Fixed
+
+- **A deleted provider no longer appears in the settings page.** `enabledProviders` is a
+  persisted allowlist, while the provider list comes from `llm-pi-ai`; removing a
+  provider there left its name in the allowlist, so the page announced
+  `当前已开启探测：cc-goat、op-go、op-zen` for a provider that no longer existed — and,
+  because a deleted provider has no card, there was no switch to turn it off. The
+  effective set is now the allowlist **intersected with the providers that exist**, the
+  leftovers are reported separately in the status payload, and the next switch change
+  writes the narrowed list. The raw value is deliberately left alone on load: a provider
+  removed temporarily and added back keeps its authorisation.
+- **Provider headers are forwarded to every probe request.** `readProvider` had been
+  reading `profile.headers` since the first release and nothing ever sent them, so a
+  gateway that requires a header beyond the API key could not be probed at all. Measured
+  case: `https://opencode.ai/zen/go/v1` (Console Go) rejects any request without
+  `x-opencode-session` — every field came back `unknown`, which reads as "this endpoint
+  cannot be measured" when the real cause is one missing header. DSH's `llm-pi-ai` sends
+  these headers itself, so the probe now matches what actually runs.
+- **`Input should be less than or equal to N` is now parsed.** A sixth pattern for the
+  Pydantic / FastAPI wording, which has no brackets, no "must be between" and no `>` —
+  the first five patterns all read it as "no range given". Measured on the same gateway:
+  `glm-5.3-flash` reports `10,000,000`. The pattern only fires when the text names the
+  field being asked about, so a bound on some other field is still reported `unknown`
+  rather than written into your configuration.
+- **The last value of an enum list is no longer dropped when prose follows it.** Rust
+  serde appends `` at line 1 column 66 `` after the accepted values; cleaning the last
+  token as a whole left it equal to nothing, so `max` silently disappeared from the
+  reported levels.
+- **`none` is recognised as the wire spelling of "no thinking".** The same gateway
+  rejects `off` and accepts `none`. Reading the list literally produced the conclusion
+  "this model cannot turn thinking off" — the opposite of the truth. The level is now
+  reported as `off`, and the note says which wire value to declare.
+
+### Added
+
+- **Transport-level retries.** A gateway that resets connections intermittently
+  (`ECONNRESET`) used to cost an entire evidence source: one reset on the listing call
+  and every model lost its `contextWindow`. The listing is retried twice and the
+  constraint-elicitation calls once; retries happen only when the connection never
+  completed, never when a response was received — a 400 is the evidence, not a failure.
+  `ETIMEDOUT` and certificate errors are not retried.
+
+### Tests
+
+- 132 tests (was 106), including a fetch-stub suite that pins both sides of the retry
+  boundary, a header-forwarding suite, and the new parser cases against captured error
+  bodies.
+
 ## [0.1.5] — 2026-09-11
 
 ### Changed

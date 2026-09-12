@@ -300,3 +300,69 @@ test('策略持久化：installSection 抛错时降级为进程内状态，插�
   apply(ctx)
   assert.equal(tools.length, 3)
 })
+
+// ── 残留 provider：白名单里的名字已从模型配置中删除 ──────────────────────────
+//
+// 这是实际收到过的反馈：用户在模型设置里删掉了 op-zen，设置页却仍显示
+// "当前已开启探测：cc-goat、op-go、op-zen"，而且因为界面上没有它的开关卡片，
+// 用户删不掉它，只能手工去改 settings.yaml。
+
+test('残留 provider：已删除的 provider 不出现在开关状态里，但被单独报告', async () => {
+  const section = {
+    providers: {
+      real: { baseURL: 'https://x.invalid', api: 'openai-completions', apiKeyEnv: 'K', models: [{ id: 'm' }] },
+    },
+  }
+  const { ctx, tools } = makeCtx({ section })
+  // 组合层白名单里同时留着真实与已删除的 provider。
+  apply(ctx, { enabledProviders: ['real', 'ghost'] })
+
+  const status = tools.find((t) => t.name === 'model_probe_status')
+  const result = await status.execute({}, {})
+
+  // 有效集合只含真实存在的 provider —— 界面据此渲染，ghost 不再出现。
+  assert.deepEqual(result.policy.enabledProviders, ['real'])
+  // 但白名单里确实还留着它，如实报告，而不是假装没有。
+  assert.deepEqual(result.policy.staleProviders, ['ghost'])
+  assert.equal(result.providers.length, 1)
+  assert.equal(result.providers[0].probeEnabled, true)
+})
+
+test('残留 provider：全部 provider 都被删掉时，开关状态为空而不是"保持着"', async () => {
+  const { ctx, tools } = makeCtx({ section: { providers: {} } })
+  apply(ctx, { enabledProviders: ['ghost-a', 'ghost-b'] })
+
+  const result = await tools.find((t) => t.name === 'model_probe_status').execute({}, {})
+
+  assert.deepEqual(result.policy.enabledProviders, [])
+  assert.deepEqual(result.policy.staleProviders, ['ghost-a', 'ghost-b'])
+})
+
+test('policy 路由：不存在的 provider 名不会被写进白名单', async () => {
+  const section = {
+    providers: { real: { baseURL: 'https://x.invalid', api: 'openai-completions', models: [] } },
+  }
+  const { ctx, routes } = makeCtx({ section })
+  apply(ctx)
+
+  const route = routes.find((r) => r.path === '/api/model-probe/policy')
+  const res = fakeRes()
+  await route.handler(fakeReq({ method: 'POST', body: { enabledProviders: ['real', 'ghost'] } }), res)
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(res.body.policy.enabledProviders, ['real'])
+})
+
+test('policy 路由：读不到任何 provider 时不做收窄（避免读取失败被当成"用户没有 provider"）', async () => {
+  const { ctx, routes } = makeCtx({ section: { providers: {} } })
+  apply(ctx)
+
+  const route = routes.find((r) => r.path === '/api/model-probe/policy')
+  const res = fakeRes()
+  await route.handler(fakeReq({ method: 'POST', body: { enabledProviders: ['keep-me'] } }), res)
+
+  assert.equal(res.status, 200)
+  // 一个 provider 都读不到时保持原样，宁可留残留也不误删用户的授权。
+  assert.deepEqual(res.body.policy.enabledProviders, [])
+  assert.deepEqual(res.body.policy.staleProviders, ['keep-me'])
+})

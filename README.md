@@ -199,7 +199,8 @@ rejected outright.
 - `settings.yaml` is backed up before every write; a rejected write removes its own
   backup so a failed attempt leaves no clutter.
 - Credentials are resolved per request through the credential seam — never cached,
-  never logged, never returned over the settings API.
+  never logged, never returned over the settings API. Provider-level `headers` from your
+  `llm-pi-ai` configuration are sent with every probe request and nowhere else.
 - Writes read the **raw user layer** (`settings.describe().user`), not the resolved
   value, so schema defaults are never baked into your configuration file.
 - A field with no evidence is reported as `unknown` and left untouched.
@@ -207,6 +208,10 @@ rejected outright.
 ## Notes
 
 - Provider routes are read from the `llm-pi-ai` settings namespace.
+- A provider's own `headers` are forwarded to every probe request, exactly as DSH sends
+  them. Some gateways require a header beyond the API key — `opencode.ai/zen/go/v1`
+  rejects any request without `x-opencode-session` — and without this the whole provider
+  reads as unmeasurable rather than misconfigured.
 - `openai-completions` and `anthropic-messages` are supported for probing.
 - The image probe uses a PNG synthesized at runtime (Node's `zlib` plus a small
   CRC32), so the package has no image dependencies.
@@ -219,7 +224,7 @@ rejected outright.
 npm test
 ```
 
-106 tests, including regressions that pin the reporting rules: an all-failed run must
+132 tests, including regressions that pin the reporting rules: an all-failed run must
 never render as "nothing to change", and a partially verified run must state how many
 fields were actually measured. The fixtures include verbatim error bodies captured from
 a real gateway, and a byte-level reimplementation of the settings path-op semantics, so
@@ -397,7 +402,8 @@ dsh plugin --profile web add dsh-model-probe@latest
 - 探测默认关闭，设置页上如实显示当前状态。
 - 扫描只读；写入需要显式确认，且校验两次。
 - 每次写入前备份 `settings.yaml`；写入被拒时删除自己的备份，失败的尝试不留垃圾。
-- 凭据按次通过凭据 seam 解析——不缓存、不写日志、不经设置页 API 返回。
+- 凭据按次通过凭据 seam 解析——不缓存、不写日志、不经设置页 API 返回。provider 自己配的
+  `headers` 只会随探测请求发出，不会用于别处。
 - 写入读取**原始用户层**（`settings.describe().user`）而非解析值，schema 默认值绝不会
   被固化进你的配置文件。
 - 没有证据的字段报告为 `unknown` 并保持不动。
@@ -405,6 +411,9 @@ dsh plugin --profile web add dsh-model-probe@latest
 ### 说明
 
 - provider 路由读自 `llm-pi-ai` 设置命名空间。
+- provider 自己配的 `headers` 会随每个探测请求照发，与 DSH 的行为一致。有些网关除 API key
+  外还强制要求别的头（`opencode.ai/zen/go/v1` 缺 `x-opencode-session` 就一律拒绝），不转发
+  的话整个 provider 看起来像"测不出来"，而实际只是配置少了一个头。
 - 支持 `openai-completions` 与 `anthropic-messages` 两种协议的探测。
 - 图像探针用的 PNG 在运行时合成（Node 自带 `zlib` 加自实现的 CRC32），因此本包没有任何
   图像依赖。
@@ -416,7 +425,7 @@ dsh plugin --profile web add dsh-model-probe@latest
 npm test
 ```
 
-106 项。其中含专门钉住「报告口径」的回归：全部取证失败时绝不能渲染成「无需改动」；部分
+132 项。其中含专门钉住「报告口径」的回归：全部取证失败时绝不能渲染成「无需改动」；部分
 取证成功时必须说明究竟量到了几个字段。测试夹具里有从真实网关逐字抓下来的错误体，还有一份
 对设置路径操作语义的逐字节复刻，因此写入在通过之前就已经过真实 schema 校验。
 
