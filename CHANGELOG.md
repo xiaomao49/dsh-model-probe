@@ -21,11 +21,12 @@ commit history.
   (`1. A yellow circle 2. A blue square 3. A yellow circle …`), taking the *first*
   integer picks up the list marker `1`; the count the model actually declared
   (`Therefore, the answer is **3**`) sat at the end of the same string. Measured against
-  the live endpoint, this misfired on **4 of 14** probes (28.6%), and two misfires in a
-  row produced the verdict "两次换图复核均数错（期望 3），判定为不支持图像输入" — a
-  capability that was declared, actually present, and wrongly denied. Because `pi-ai`
-  refuses images before attaching them, that verdict permanently disables image input for
-  a model that supports it, so the asymmetry here is severe.
+  the live endpoint, this misfired on **9 of 24** probes across two samples (4/14 and
+  5/10) — with the fixed parser, 0 of 10 — and two misfires in a row produced the verdict
+  "两次换图复核均数错（期望 3），判定为不支持图像输入" — a capability that was
+  declared, actually present, and wrongly denied. Because `pi-ai` refuses images before
+  attaching them, that verdict permanently disables image input for a model that supports
+  it, so the asymmetry here is severe.
   The probe question now pins the answer format (`TOTAL=<digit>` on its own final line),
   and the parser reads, in order: the explicitly declared answer (`TOTAL=`, "the answer
   is", "there are", "答案是"), then the last standalone integer. Reading the first integer
