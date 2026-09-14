@@ -34,12 +34,25 @@ commit history.
   是伪造数据）、`-0` 归一为 `0`、`null` 保留（本插件用 `?? null` 表示"明确无值"）、
   数组项被清洗掉时不留空洞。`__proto__` / `constructor` 用 defineProperty 写入，
   避免普通赋值改写原型。
-  回归测试新增两份（`test/lossless.test.mjs`、`test/tool-boundary.test.mjs`，13 项）：
-  用插件自己导出的 `describeOps` 造出真实产物证明它未收口时确实不合格，再断言三份
-  工具返回值与四条 HTTP 路由的报文全部合格；判定器优先用宿主真实的 `isJsonValue`，
-  拿不到时回退到逐条对应的复刻实现。已做反证——去掉收口后 status 测试立即变红。
-  原先 108 项测试全绿也没拦住它，因为那些测试断言的是业务语义（阈值、容差、写入
-  路径），没有一项断言过返回值的**形状**本身。
+
+### Tests
+
+- 168 tests (was 108 after a full `npm ci`; the two files that only fail without
+  devDependencies — `plugin.test.mjs` / `write-path.test.mjs` — are unrelated).
+  Two new files, 13 tests:
+  - `test/lossless.test.mjs` — uses the plugin's own `describeOps` to produce a *real*
+    payload (a newly added `reasoningEfforts` field, so `from` exists with value
+    `undefined`) and asserts it fails the gate before compacting, then pins down
+    `compact`'s semantics one by one: `null` survives, `NaN`/`±Infinity` are dropped,
+    `-0` becomes `0`, arrays keep no holes, `__proto__` does not reach the prototype.
+  - `test/tool-boundary.test.mjs` — installs the plugin on a fake ctx and actually
+    **executes** all three tools plus four HTTP routes, feeding each return value to the
+    host's real `isJsonValue`. The judge is loaded from `@deepseek-ai/dsh-util-values`
+    when resolvable and falls back to a line-by-line replica otherwise.
+- Verified by counter-proof: removing the outlet compaction turns the status test red
+  immediately. The previous 108 tests were all green and still missed this, because they
+  asserted business semantics (thresholds, tolerances, the write path) and not one of
+  them asserted the **shape** of a return value.
 
 ## [0.1.11] — 2026-09-12
 
