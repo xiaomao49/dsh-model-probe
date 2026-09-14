@@ -9,6 +9,38 @@ never got one and links to npm instead. GitHub Releases were first published wit
 so the entries below are reconstructed from those tags, the npm publish times and the
 commit history.
 
+## [0.1.12] — 2026-09-14
+
+### Fixed
+
+- **两个工具在"有东西可报"的时候反而报错：`model_probe_status` 从来没成功过，
+  `model_probe_scan` 只在探针全坏时可用。** 根因不在探测逻辑，而在返回值的形状——
+  DSH 的取值边界（`@deepseek-ai/dsh-util-values` 的 `isJsonValue`）把 `undefined`
+  判为非法，携带它的对象过不了闸门，工具通道直接抛
+  `tool "model_probe_status" returned invalid output: value is not lossless JSON`。
+  而 `JSON.stringify` 会静默丢掉 `undefined` 属性，两者语义不一致：本插件照"JSON
+  会丢"的直觉写（可选字段直接写进对象），撞上的是"不丢才合格"的判据。
+  症状因此完全反直觉 —— 请求全部失败时所有 finding 的 verdict 都是 `unknown`，
+  被出口过滤器滤光，对象里一个非法值都没有，工具反而正常；一旦真的取证到字段，
+  `limit` / `note` / `from` 之类的可选值带着 `undefined` 出现，工具立刻挂掉。
+  **探针坏着的时候工具能用，修好了反而挂。**
+  报告来自 issue #1，附了可复现的最小算例与判据实证。
+  修法是新增 `compact()`（`lib/scan.js`）在所有跨边界出口统一收口，而不是逐字段
+  条件展开——后者每新增一个可选字段就要记得写一次，漏掉一次就是一次线上不可用。
+  收口点：`model_probe_status` / `model_probe_scan` / `model_probe_apply` 三个工具，
+  以及设置页的**全部** HTTP 响应（在 `send()` 里收一次；客户端边界的判据与工具通道
+  是同一个 `isJsonValue`，不只在工具出口收）。
+  清洗规则与判据逐条对应：`undefined` 丢键、`NaN`/`±Infinity` 丢键（写成 `null`
+  是伪造数据）、`-0` 归一为 `0`、`null` 保留（本插件用 `?? null` 表示"明确无值"）、
+  数组项被清洗掉时不留空洞。`__proto__` / `constructor` 用 defineProperty 写入，
+  避免普通赋值改写原型。
+  回归测试新增两份（`test/lossless.test.mjs`、`test/tool-boundary.test.mjs`，13 项）：
+  用插件自己导出的 `describeOps` 造出真实产物证明它未收口时确实不合格，再断言三份
+  工具返回值与四条 HTTP 路由的报文全部合格；判定器优先用宿主真实的 `isJsonValue`，
+  拿不到时回退到逐条对应的复刻实现。已做反证——去掉收口后 status 测试立即变红。
+  原先 108 项测试全绿也没拦住它，因为那些测试断言的是业务语义（阈值、容差、写入
+  路径），没有一项断言过返回值的**形状**本身。
+
 ## [0.1.11] — 2026-09-12
 
 ### Fixed
