@@ -9,6 +9,16 @@ never got one and links to npm instead. GitHub Releases were first published wit
 so the entries below are reconstructed from those tags, the npm publish times and the
 commit history.
 
+## [0.1.13] — 2026-09-14
+
+### Changed
+
+- **仅元数据与文档：`lib/` 与 0.1.12 逐字节相同，插件行为完全一致。** 本次发布存在的
+  唯一理由是 npm 上的 `0.1.12` tarball 带的是 CHANGELOG 的**首个版本**（内容完整，但
+  测试说明写在 `Fixed` 段里，没有按仓库惯例单列 `### Tests`）。已发布版本的 tarball
+  无法在不改版本号的前提下替换，所以用一个新版本把三处对齐：npm tarball、仓库 tag、
+  GitHub Release 现在都是下面这份规范文本。**已经装了 0.1.12 的不需要升级。**
+
 ## [0.1.12] — 2026-09-14
 
 ### Fixed
@@ -37,7 +47,7 @@ commit history.
 
 ### Tests
 
-- 168 tests (was 108 after a full `npm ci`; the two files that only fail without
+- 168 tests (was 108 before `npm ci`; the two files that only fail without
   devDependencies — `plugin.test.mjs` / `write-path.test.mjs` — are unrelated).
   Two new files, 13 tests:
   - `test/lossless.test.mjs` — uses the plugin's own `describeOps` to produce a *real*
